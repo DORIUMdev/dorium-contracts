@@ -1,0 +1,11 @@
+{
+  "devDependencies": {
+    "@cosmjs/cli": "^0.25.2"
+  },
+  "dependencies": {
+    "@cosmjs/cosmwasm-stargate": "^0.25.2",
+    "@cosmjs/proto-signing": "^0.25.2",
+    "@cosmjs/stargate": "^0.25.2",
+    "dotenv": "^9.0.2"
+  }
+}
