@@ -170,49 +170,79 @@ mod tests {
     }
 
     #[test]
-    fn increment() {
-        let mut deps = mock_dependencies(&coins(2, "token"));
+    fn set_status() {
+        let mut deps = mock_dependencies(&[]);
+        let vs = vec![Addr::unchecked("validator1"), Addr::unchecked("validator2")];
+        let msg = InstantiateMsg {
+            proposer: Addr::unchecked("proposer"),
+            budget: Coin {
+                amount: Uint128(1000),
+                denom: "BTC".into(),
+            },
+            validators: vs,
+        };
+        let info = mock_info("creator", &coins(1000, "earth"));
 
-        let msg = InstantiateMsg { count: 17 };
-        let info = mock_info("creator", &coins(2, "token"));
-        let _res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
+        // we can just call .unwrap() to assert this was a success
+        let res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
+        assert_eq!(0, res.messages.len());
 
-        // beneficiary can release it
-        let info = mock_info("anyone", &coins(2, "token"));
-        let msg = ExecuteMsg::Increment {};
+        // validators can change the Proposal's status
+        let info = mock_info("validator1", &coins(2, "earth"));
+        let msg = ExecuteMsg::SetStatus {
+            s: Status::InProgress {},
+        };
         let _res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+        let sr = query_state(deps.as_ref()).unwrap();
+        assert_eq!(sr.state.status, Status::InProgress {});
 
-        // should increase counter by 1
-        let res = query(deps.as_ref(), mock_env(), QueryMsg::GetCount {}).unwrap();
-        let value: CountResponse = from_binary(&res).unwrap();
-        assert_eq!(18, value.count);
-    }
+        let info = mock_info("validator2", &coins(2, "earth"));
+        let msg = ExecuteMsg::SetStatus {
+            s: Status::Validated {},
+        };
+        let _res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+        let sr = query_state(deps.as_ref()).unwrap();
+        assert_eq!(sr.state.status, Status::Validated {});
 
-    #[test]
-    fn reset() {
-        let mut deps = mock_dependencies(&coins(2, "token"));
-
-        let msg = InstantiateMsg { count: 17 };
-        let info = mock_info("creator", &coins(2, "token"));
-        let _res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
-
-        // beneficiary can release it
-        let unauth_info = mock_info("anyone", &coins(2, "token"));
-        let msg = ExecuteMsg::Reset { count: 5 };
-        let res = execute(deps.as_mut(), mock_env(), unauth_info, msg);
-        match res {
-            Err(ContractError::Unauthorized {}) => {}
-            _ => panic!("Must return unauthorized error"),
+        // unknown validator cannot change the status
+        let info = mock_info("validator3", &coins(2, "earth"));
+        let msg = ExecuteMsg::SetStatus {
+            s: Status::Opened {},
+        };
+        let err = execute(deps.as_mut(), mock_env(), info.clone(), msg.clone()).unwrap_err();
+        match err {
+            ContractError::Unauthorized { .. } => {}
+            e => panic!("unexpected error: {}", e),
         }
-
-        // only the original creator can reset the counter
-        let auth_info = mock_info("creator", &coins(2, "token"));
-        let msg = ExecuteMsg::Reset { count: 5 };
-        let _res = execute(deps.as_mut(), mock_env(), auth_info, msg).unwrap();
-
-        // should now be 5
-        let res = query(deps.as_ref(), mock_env(), QueryMsg::GetCount {}).unwrap();
-        let value: CountResponse = from_binary(&res).unwrap();
-        assert_eq!(5, value.count);
+        let sr = query_state(deps.as_ref()).unwrap();
+        assert_eq!(sr.state.status, Status::Validated {});
     }
+
+    // #[test]
+    // fn reset() {
+    //     let mut deps = mock_dependencies(&coins(2, "token"));
+
+    //     let msg = InstantiateMsg { count: 17 };
+    //     let info = mock_info("creator", &coins(2, "token"));
+    //     let _res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
+
+    //     // beneficiary can release it
+    //     let unauth_info = mock_info("anyone", &coins(2, "token"));
+    //     let msg = ExecuteMsg::Reset { count: 5 };
+    //     let res = execute(deps.as_mut(), mock_env(), unauth_info, msg);
+    //     match res {
+    //         Err(ContractError::Unauthorized {}) => {}
+    //         _ => panic!("Must return unauthorized error"),
+    //     }
+
+    //     // only the original creator can reset the counter
+    //     let auth_info = mock_info("creator", &coins(2, "token"));
+    //     let msg = ExecuteMsg::Reset { count: 5 };
+    //     let _res = execute(deps.as_mut(), mock_env(), auth_info, msg).unwrap();
+
+    //     // should now be 5
+    //     let res = query(deps.as_ref(), mock_env(), QueryMsg::GetCount {}).unwrap();
+    //     let value: CountResponse = from_binary(&res).unwrap();
+    //     assert_eq!(5, value.count);
+    // }
 }
