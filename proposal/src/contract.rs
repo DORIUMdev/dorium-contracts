@@ -3,7 +3,7 @@ use cosmwasm_std::{
     StdResult,
 };
 
-use crate::msg::{CountResponse, ExecuteMsg, InstantiateMsg, QueryMsg, StateResponse};
+use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg, StateResponse};
 use crate::state::{State, STATE};
 use crate::{error::ContractError, state::Status};
 
@@ -97,7 +97,7 @@ pub fn try_rm_validator(
         }
 
         // check that the address to be added isn't already in there
-        match state.validators.iter().position(|&v| v == validator) {
+        match state.validators.iter().position(|v| *v == validator) {
             Some(i) => {
                 state.validators.remove(i);
             }
@@ -119,7 +119,7 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     }
 }
 
-fn query_state(deps: Deps) -> StdResult<CountResponse> {
+fn query_state(deps: Deps) -> StdResult<StateResponse> {
     let state = STATE.load(deps.storage)?;
     Ok(StateResponse { state: state })
 }
@@ -127,14 +127,24 @@ fn query_state(deps: Deps) -> StdResult<CountResponse> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
-    use cosmwasm_std::{coins, from_binary};
+    use cosmwasm_std::{coins, from_binary, Uint128};
+    use cosmwasm_std::{
+        testing::{mock_dependencies, mock_env, mock_info},
+        Coin,
+    };
 
     #[test]
     fn proper_initialization() {
         let mut deps = mock_dependencies(&[]);
-
-        let msg = InstantiateMsg { count: 17 };
+        let vs = vec![Addr::unchecked("validator1"), Addr::unchecked("validator2")];
+        let msg = InstantiateMsg {
+            proposer: Addr::unchecked("proposer"),
+            budget: Coin {
+                amount: Uint128(1000),
+                denom: "BTC".into(),
+            },
+            validators: vs,
+        };
         let info = mock_info("creator", &coins(1000, "earth"));
 
         // we can just call .unwrap() to assert this was a success
@@ -142,9 +152,21 @@ mod tests {
         assert_eq!(0, res.messages.len());
 
         // it worked, let's query the state
-        let res = query(deps.as_ref(), mock_env(), QueryMsg::GetCount {}).unwrap();
-        let value: CountResponse = from_binary(&res).unwrap();
-        assert_eq!(17, value.count);
+        let res = query(deps.as_ref(), mock_env(), QueryMsg::GetState {}).unwrap();
+        let s: StateResponse = from_binary(&res).unwrap();
+        let state: State = s.state;
+        println!("{:?}", state);
+        let state_reference = State {
+            admin: Addr::unchecked("creator"),
+            proposer: Addr::unchecked("proposer"),
+            budget: Coin {
+                denom: "BTC".into(),
+                amount: Uint128(1000),
+            },
+            validators: vec![Addr::unchecked("validator1"), Addr::unchecked("validator2")],
+            status: Status::Opened {},
+        };
+        assert_eq!(state, state_reference);
     }
 
     #[test]
