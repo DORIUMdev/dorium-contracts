@@ -1,8 +1,9 @@
 use cosmwasm_std::{
-    entry_point, to_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult,
+    entry_point, to_binary, Addr, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdError,
+    StdResult,
 };
 
-use crate::msg::{CountResponse, ExecuteMsg, InstantiateMsg, QueryMsg};
+use crate::msg::{CountResponse, ExecuteMsg, InstantiateMsg, QueryMsg, StateResponse};
 use crate::state::{State, STATE};
 use crate::{error::ContractError, state::Status};
 
@@ -16,6 +17,7 @@ pub fn instantiate(
     msg: InstantiateMsg,
 ) -> Result<Response, ContractError> {
     let state = State {
+        admin: info.sender,
         proposer: msg.proposer,
         budget: msg.budget,
         validators: msg.validators,
@@ -37,34 +39,74 @@ pub fn execute(
     match msg {
         ExecuteMsg::SetStatus { s } => try_set_status(deps, info, s),
         // only DORIUM can add/remove validators
-        ExecuteMsg::AddValidator { addr } => try_reset(deps, info, addr),
-        ExecuteMsg::RmValidator { addr } => try_reset(deps, info, count),
+        ExecuteMsg::AddValidator { addr } => try_add_validator(deps, info, addr),
+        ExecuteMsg::RmValidator { addr } => try_rm_validator(deps, info, addr),
     }
 }
 
 pub fn try_set_status(
     deps: DepsMut,
     info: MessageInfo,
-    s: Status,
+    status: Status,
 ) -> Result<Response, ContractError> {
     STATE.update(deps.storage, |mut state| -> Result<_, ContractError> {
         // only validators can update the state of a Proposal
         if !state.validators.contains(&info.sender) {
             return Err(ContractError::Unauthorized {});
         }
-        state.status = s;
+        state.status = status;
         Ok(state)
     })?;
 
     Ok(Response::default())
 }
 
-pub fn try_reset(deps: DepsMut, info: MessageInfo, count: i32) -> Result<Response, ContractError> {
+pub fn try_add_validator(
+    deps: DepsMut,
+    info: MessageInfo,
+    validator: Addr,
+) -> Result<Response, ContractError> {
     STATE.update(deps.storage, |mut state| -> Result<_, ContractError> {
-        if info.sender != state.owner {
+        // only DORIUM can add/remove validators to a Proposal
+        if info.sender != state.admin {
             return Err(ContractError::Unauthorized {});
         }
-        state.count = count;
+
+        // check that the address to be added isn't already in there
+        if state.validators.contains(&validator) {
+            return Err(ContractError::Std(StdError::generic_err(
+                "Validator is already registered",
+            )));
+        }
+
+        state.validators.push(validator);
+        Ok(state)
+    })?;
+    Ok(Response::default())
+}
+
+pub fn try_rm_validator(
+    deps: DepsMut,
+    info: MessageInfo,
+    validator: Addr,
+) -> Result<Response, ContractError> {
+    STATE.update(deps.storage, |mut state| -> Result<_, ContractError> {
+        // only DORIUM can add/remove validators to a Proposal
+        if info.sender != state.admin {
+            return Err(ContractError::Unauthorized {});
+        }
+
+        // check that the address to be added isn't already in there
+        match state.validators.iter().position(|&v| v == validator) {
+            Some(i) => {
+                state.validators.remove(i);
+            }
+            None => {
+                return Err(
+                    StdError::generic_err("Validator was not registered as a validator").into(),
+                )
+            }
+        }
         Ok(state)
     })?;
     Ok(Response::default())
@@ -73,13 +115,13 @@ pub fn try_reset(deps: DepsMut, info: MessageInfo, count: i32) -> Result<Respons
 #[entry_point]
 pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
-        QueryMsg::GetCount {} => to_binary(&query_count(deps)?),
+        QueryMsg::GetState {} => to_binary(&query_state(deps)?),
     }
 }
 
-fn query_count(deps: Deps) -> StdResult<CountResponse> {
+fn query_state(deps: Deps) -> StdResult<CountResponse> {
     let state = STATE.load(deps.storage)?;
-    Ok(CountResponse { count: state.count })
+    Ok(StateResponse { state: state })
 }
 
 #[cfg(test)]
