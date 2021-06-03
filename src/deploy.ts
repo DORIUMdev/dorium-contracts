@@ -42,11 +42,10 @@ async function uploadEscrow() {
 
 export async function main() {
 	try {
-		await uploadERC20();
-		await uploadEscrow();
+		const erc20 = await uploadERC20();
+		if (Boolean(erc20)) await uploadEscrow();
 	} catch (e) {
 		throw e;
 	}
 }
 
-main()
