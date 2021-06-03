@@ -12,11 +12,11 @@ wasmd init localnet --chain-id ${CHAIN_ID} --home ${APP_HOME}
 sed -i -r 's/minimum-gas-prices = ""/minimum-gas-prices = "0.01ucosm"/' ${APP_HOME}/config/app.toml
 
 # add your wallet addresses to genesis
-wasmd add-genesis-account $(wasmd keys show -a main) 10000000000ucosm,10000000000stake --home ${APP_HOME}
-wasmd add-genesis-account $(wasmd keys show -a validator) 10000000000ucosm,10000000000stake --home ${APP_HOME}
+wasmd add-genesis-account $(wasmd keys show -a main --keyring-backend=test) 10000000000ucosm,10000000000stake --home ${APP_HOME}
+wasmd add-genesis-account $(wasmd keys show -a validator --keyring-backend=test) 10000000000ucosm,10000000000stake --home ${APP_HOME}
 
 # add fred's address as validator's address
-wasmd gentx validator 1000000000stake --home ${APP_HOME} --chain-id ${CHAIN_ID}
+wasmd gentx validator 1000000000stake --home ${APP_HOME} --chain-id ${CHAIN_ID} --keyring-backend=test --keyring-dir=~/.wasmd
 
 # collect gentxs to genesis
 wasmd collect-gentxs --home ${APP_HOME}
