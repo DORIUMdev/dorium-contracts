@@ -5,10 +5,11 @@ import { SigningCosmWasmClient } from "@cosmjs/cosmwasm-stargate";
 
 config();
 
-const { ERC20_CONTRACT, ESCROW_CONTRACT, MNEMONIC_MAIN, RPC_ENDPOINT } = process.env;
+const { ERC20_CONTRACT, ESCROW_CONTRACT, DORIUM_PROPOSAL_CONTRACT, MNEMONIC_MAIN, RPC_ENDPOINT } = process.env;
 const options = { prefix: "wasm" };
 const ERC20Contract = fs.readFileSync(ERC20_CONTRACT)
 const EscrowContract = fs.readFileSync(ESCROW_CONTRACT);
+const ProposalContract = fs.readFileSync(DORIUM_PROPOSAL_CONTRACT);
 
 async function getWalletData() {
 	const wallet_main = await DirectSecp256k1HdWallet.fromMnemonic(MNEMONIC_MAIN, options);
@@ -37,15 +38,23 @@ async function uploadEscrow() {
 	const wallet = await getWalletData();
 	const client_main = await SigningCosmWasmClient.connectWithSigner(RPC_ENDPOINT, wallet, options);
 	const contractData = await client_main.upload(account.address, EscrowContract)
-	
-	console.log('Escrow', contractData);
+}
+
+
+async function uploadProposal() {
+	const account = await getWalletAccount();
+	const wallet = await getWalletData();
+	const client_main = await SigningCosmWasmClient.connectWithSigner(RPC_ENDPOINT, wallet, options);
+	const contractData = await client_main.upload(account.address, ProposalContract)
+	console.log('DORCP', contractData);
+
 }
 
 export async function main() {
 	try {
 		const erc20 = await uploadERC20();
 		// if (Boolean(erc20)) await uploadEscrow();
-		return erc20;
+		await uploadProposal();
 	} catch (e) {
 		throw e;
 	}
