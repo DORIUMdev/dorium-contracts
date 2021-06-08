@@ -29,7 +29,6 @@ async function uploadERC20() {
 	const wallet = await getWalletData();
 	const client_main = await SigningCosmWasmClient.connectWithSigner(RPC_ENDPOINT, wallet, options);
 	const contractData = await client_main.upload(account.address, ERC20Contract)
-	
 	console.log('ERC20', contractData);
 }
 
@@ -38,6 +37,7 @@ async function uploadEscrow() {
 	const wallet = await getWalletData();
 	const client_main = await SigningCosmWasmClient.connectWithSigner(RPC_ENDPOINT, wallet, options);
 	const contractData = await client_main.upload(account.address, EscrowContract)
+	console.log('Escrow', contractData);
 }
 
 
@@ -47,13 +47,12 @@ async function uploadProposal() {
 	const client_main = await SigningCosmWasmClient.connectWithSigner(RPC_ENDPOINT, wallet, options);
 	const contractData = await client_main.upload(account.address, ProposalContract)
 	console.log('DORCP', contractData);
-
 }
 
 export async function main() {
 	try {
-		const erc20 = await uploadERC20();
-		// if (Boolean(erc20)) await uploadEscrow();
+		await uploadERC20();
+		await uploadEscrow();
 		await uploadProposal();
 	} catch (e) {
 		throw e;
