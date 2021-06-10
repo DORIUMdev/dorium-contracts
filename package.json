@@ -1,6 +1,6 @@
 {
   "devDependencies": {
-    "@cosmjs/cli": "^0.25.2",
+    "@cosmjs/cli": "^0.25.4",
     "@types/node": "^15.6.0"
   },
   "dependencies": {
