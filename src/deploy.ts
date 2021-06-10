@@ -24,19 +24,32 @@ async function getWalletAccount() {
 	return mainAccount;
 }
 
-async function uploadERC20() {
+async function instantiateCW20() {
 	const account = await getWalletAccount();
 	const wallet = await getWalletData();
-	const client_main = await SigningCosmWasmClient.connectWithSigner(RPC_ENDPOINT, wallet, options);
-	const contractData = await client_main.upload(account.address, ERC20Contract)
-	console.log('ERC20', contractData);
+	const client = await SigningCosmWasmClient.connectWithSigner(RPC_ENDPOINT, wallet, options);
+	const initMsg = {
+		name: "Dorium Value Token",
+		symbol: "TREE",
+		decimals: 2,
+		initial_balances: [
+			{ address: "wasm1ryuawewrukex42yh2kpydtpdh90ex096kaajek", amount: "3040000000000"}, // number of trees in the world according to Google
+		],
+		mint: {
+			minter: "wasm1ryuawewrukex42yh2kpydtpdh90ex096kaajek"
+		}
+	}
+	const contractData = await client.upload(account.address, ERC20Contract)
+	const contractAddress = await client.instantiate(account.address, contractData.codeId, initMsg, "creating the cw20 token")
+	console.log('CW20 Value Token Uploaded Contract', contractData);
+	console.log('CW20 Value Token Instantiated Contract', contractAddress);
 }
 
 async function uploadEscrow() {
 	const account = await getWalletAccount();
 	const wallet = await getWalletData();
-	const client_main = await SigningCosmWasmClient.connectWithSigner(RPC_ENDPOINT, wallet, options);
-	const contractData = await client_main.upload(account.address, EscrowContract)
+	const client = await SigningCosmWasmClient.connectWithSigner(RPC_ENDPOINT, wallet, options);
+	const contractData = await client.upload(account.address, EscrowContract)
 	console.log('Escrow', contractData);
 }
 
@@ -44,14 +57,14 @@ async function uploadEscrow() {
 async function uploadProposal() {
 	const account = await getWalletAccount();
 	const wallet = await getWalletData();
-	const client_main = await SigningCosmWasmClient.connectWithSigner(RPC_ENDPOINT, wallet, options);
-	const contractData = await client_main.upload(account.address, ProposalContract)
+	const client = await SigningCosmWasmClient.connectWithSigner(RPC_ENDPOINT, wallet, options);
+	const contractData = await client.upload(account.address, ProposalContract)
 	console.log('DORCP', contractData);
 }
 
 export async function main() {
 	try {
-		await uploadERC20();
+		await instantiateCW20();
 		await uploadEscrow();
 		await uploadProposal();
 	} catch (e) {
