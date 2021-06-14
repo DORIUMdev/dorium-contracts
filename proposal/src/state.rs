@@ -1,7 +1,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use cosmwasm_std::{Addr, Coin, Env, Order, StdError, StdResult, Storage, Timestamp};
+use cosmwasm_std::{Addr, Coin, Order, StdError, StdResult, Storage};
 use cw_storage_plus::Map;
 
 use cw20::{Balance, Cw20CoinVerified};
@@ -47,44 +47,32 @@ impl GenericBalance {
     }
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub enum Status {
+    Opened {},
+    InProgress {},
+    Canceled {},
+    Completed {},
+}
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
 pub struct Escrow {
-    /// arbiter can decide to approve or refund the escrow
-    pub arbiter: Addr,
-    /// if approved, funds go to the recipient
-    pub recipient: Addr,
-    /// if refunded, funds go to the source
+    /// more information about this proposal (URL to forum topic?)
+    pub description: String,
+    /// validators assigned by Dorium can decide to approve or refund the escrow
+    pub validators: Vec<Addr>,
+    /// if approved, funds go to the proposer
+    pub proposer: Addr,
+    /// if refunded, funds go to the source (Dorium)
     pub source: Addr,
-    /// When end height set and block height exceeds this value, the escrow is expired.
-    /// Once an escrow is expired, it can be returned to the original funder (via "refund").
-    pub end_height: Option<u64>,
-    /// When end time (in seconds since epoch 00:00:00 UTC on 1 January 1970) is set and
-    /// block time exceeds this value, the escrow is expired.
-    /// Once an escrow is expired, it can be returned to the original funder (via "refund").
-    pub end_time: Option<u64>,
     /// Balance in Native and Cw20 tokens
     pub balance: GenericBalance,
     /// All possible contracts that we accept tokens from
     pub cw20_whitelist: Vec<Addr>,
+    /// status of the proposal (enum: opened, in progress, canceled, completed)
+    pub status: Status,
 }
 
 impl Escrow {
-    pub fn is_expired(&self, env: &Env) -> bool {
-        if let Some(end_height) = self.end_height {
-            if env.block.height > end_height {
-                return true;
-            }
-        }
-
-        if let Some(end_time) = self.end_time {
-            if env.block.time > Timestamp::from_seconds(end_time) {
-                return true;
-            }
-        }
-
-        false
-    }
-
     pub fn human_whitelist(&self) -> Vec<String> {
         self.cw20_whitelist.iter().map(|a| a.to_string()).collect()
     }
@@ -115,13 +103,13 @@ mod tests {
 
     fn dummy_escrow() -> Escrow {
         Escrow {
-            arbiter: Addr::unchecked("arb"),
-            recipient: Addr::unchecked("recip"),
+            description: "test escrow".to_string(),
+            validators: vec![Addr::unchecked("arb")],
+            proposer: Addr::unchecked("proposer"),
             source: Addr::unchecked("source"),
-            end_height: None,
-            end_time: None,
             balance: Default::default(),
-            cw20_whitelist: vec![],
+            cw20_whitelist: vec![Addr::unchecked("Cw20 Value Token")],
+            status: Status::Opened {},
         }
     }
 
