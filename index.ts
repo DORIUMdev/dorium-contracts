@@ -1,3 +1,3 @@
 import { main } from "./src/deploy";
 
-main();
+main().then(r => r);

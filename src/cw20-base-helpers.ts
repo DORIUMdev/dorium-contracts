@@ -1,7 +1,7 @@
 import { SigningCosmWasmClient } from "@cosmjs/cosmwasm-stargate";
 
 
-export {CW20};
+// TODO: Extract to separate folder: interfaces and funcs
 interface Balances {
   readonly address: string
   readonly amount: string  // decimal as string
@@ -69,7 +69,7 @@ interface CW20Contract {
 }
 
 
-const CW20 = (client: SigningCosmWasmClient): CW20Contract => {
+export const CW20 = (client: SigningCosmWasmClient): CW20Contract => {
   const use = (contractAddress: string): CW20Instance => {
     const balance = async (account?: string): Promise<string> => {
       const address = account || client.senderAddress;
@@ -154,7 +154,6 @@ const CW20 = (client: SigningCosmWasmClient): CW20Contract => {
       throw new Error(`Download error: ${r.status}`)
     }
     return r.data
-  }
 
   const upload = async (): Promise<number> => {
     const meta = {
