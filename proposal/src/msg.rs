@@ -57,8 +57,6 @@ pub struct CreateMsg {
     /// that are accepted by the escrow during a top-up. This is required to avoid a DoS attack by topping-up
     /// with an invalid cw20 contract. See https://github.com/CosmWasm/cosmwasm-plus/issues/19
     pub cw20_whitelist: Option<Vec<String>>,
-    /// status of the proposal (enum: opened, in progress, canceled, completed)
-    pub status: Status,
 }
 
 impl CreateMsg {
@@ -96,25 +94,20 @@ pub struct ListResponse {
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
 pub struct DetailsResponse {
-    /// id of this escrow
-    pub id: String,
-    /// arbiter can decide to approve or refund the escrow
-    pub arbiter: String,
-    /// if approved, funds go to the recipient
-    pub recipient: String,
-    /// if refunded, funds go to the source
-    pub source: String,
-    /// When end height set and block height exceeds this value, the escrow is expired.
-    /// Once an escrow is expired, it can be returned to the original funder (via "refund").
-    pub end_height: Option<u64>,
-    /// When end time (in seconds since epoch 00:00:00 UTC on 1 January 1970) is set and
-    /// block time exceeds this value, the escrow is expired.
-    /// Once an escrow is expired, it can be returned to the original funder (via "refund").
-    pub end_time: Option<u64>,
+    /// more information about this proposal (URL to forum topic?)
+    pub description: String,
+    /// validators assigned by Dorium can decide to approve or refund the escrow
+    pub validators: Vec<Addr>,
+    /// if approved, funds go to the proposer
+    pub proposer: Addr,
+    /// if refunded, funds go to the source (Dorium)
+    pub source: Addr,
     /// Balance in native tokens
     pub native_balance: Vec<Coin>,
     /// Balance in cw20 tokens
     pub cw20_balance: Vec<Cw20Coin>,
     /// Whitelisted cw20 tokens
     pub cw20_whitelist: Vec<String>,
+    /// status of the proposal (enum: opened, in progress, canceled, completed)
+    pub status: Status,
 }
