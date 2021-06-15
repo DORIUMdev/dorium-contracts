@@ -43,14 +43,17 @@ pub enum ReceiveMsg {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct CreateMsg {
+    /// id is a human-readable name for the escrow to use later
+    /// 3-20 bytes of utf-8 text
+    pub id: String,
     /// more information about this proposal (URL to forum topic?)
     pub description: String,
     /// validators assigned by Dorium can decide to approve or refund the escrow
-    pub validators: Vec<Addr>,
+    pub validators: Vec<String>,
     /// if approved, funds go to the proposer
-    pub proposer: Addr,
+    pub proposer: String,
     /// if refunded, funds go to the source (Dorium)
-    pub source: Addr,
+    pub source: String,
     /// Balance in Native and Cw20 tokens
     pub balance: GenericBalance,
     /// Besides any possible tokens sent with the CreateMsg, this is a list of all cw20 token addresses

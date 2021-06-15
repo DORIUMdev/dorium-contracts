@@ -56,6 +56,9 @@ pub enum Status {
 }
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
 pub struct Escrow {
+    /// id is a human-readable name. It is the key in the mapping to store the
+    /// Escrow state, so it cannot be changed. 3-20 bytes of utf-8 text
+    pub id: String,
     /// more information about this proposal (URL to forum topic?)
     pub description: String,
     /// validators assigned by Dorium can decide to approve or refund the escrow
@@ -103,7 +106,8 @@ mod tests {
 
     fn dummy_escrow() -> Escrow {
         Escrow {
-            description: "test escrow".to_string(),
+            id: "test escrow".to_string(),
+            description: "more information about the test here".to_string(),
             validators: vec![Addr::unchecked("arb")],
             proposer: Addr::unchecked("proposer"),
             source: Addr::unchecked("source"),
