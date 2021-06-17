@@ -39,10 +39,10 @@ pub fn execute(
         ExecuteMsg::Create(msg) => {
             execute_create(deps, msg, Balance::from(info.funds), &info.sender)
         }
-        ExecuteMsg::Approve { id } => (),
-        ExecuteMsg::TopUp { id } => (),
-        ExecuteMsg::Refund { id } => (),
-        ExecuteMsg::Receive(msg) => (),
+        ExecuteMsg::Approve { id } => execute_approve(deps, env, info, id),
+        ExecuteMsg::TopUp { id } => execute_top_up(deps, id, Balance::from(info.funds)),
+        ExecuteMsg::Refund { id } => execute_refund(deps, env, info, id),
+        ExecuteMsg::Receive(msg) => execute_receive(deps, info, msg),
     }
 }
 
@@ -100,7 +100,7 @@ pub fn execute_create(
     }
 
     let escrow = Escrow {
-        id: msg.id,
+        id: msg.id.clone(),
         description: msg.description,
         validators: validators,
         proposer: deps.api.addr_validate(&msg.proposer)?,
@@ -248,4 +248,52 @@ fn send_tokens(to: &Addr, balance: &GenericBalance) -> StdResult<Vec<CosmosMsg>>
         .collect();
     msgs.append(&mut cw20_msgs?);
     Ok(msgs)
+}
+
+#[cfg_attr(not(feature = "library"), entry_point)]
+pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
+    match msg {
+        QueryMsg::List {} => to_binary(&query_list(deps)?),
+        QueryMsg::Details { id } => to_binary(&query_details(deps, id)?),
+    }
+}
+
+fn query_details(deps: Deps, id: String) -> StdResult<DetailsResponse> {
+    let escrow = ESCROWS.load(deps.storage, &id)?;
+
+    let cw20_whitelist = escrow.human_whitelist();
+
+    // transform tokens
+    let native_balance = escrow.balance.native;
+
+    let cw20_balance: StdResult<Vec<_>> = escrow
+        .balance
+        .cw20
+        .into_iter()
+        .map(|token| {
+            Ok(Cw20Coin {
+                address: token.address.into(),
+                amount: token.amount,
+            })
+        })
+        .collect();
+
+    let details = DetailsResponse {
+        id,
+        description: escrow.description,
+        validators: escrow.validators,
+        proposer: escrow.proposer,
+        source: escrow.source,
+        native_balance: native_balance,
+        cw20_balance: cw20_balance?,
+        cw20_whitelist: cw20_whitelist,
+        status: escrow.status,
+    };
+    Ok(details)
+}
+
+fn query_list(deps: Deps) -> StdResult<ListResponse> {
+    Ok(ListResponse {
+        escrows: all_escrow_ids(deps.storage)?,
+    })
 }
