@@ -1,7 +1,7 @@
 use crate::state::{all_escrow_ids, Escrow, GenericBalance, ESCROWS};
 use cosmwasm_std::{
-    attr, entry_point, from_binary, to_binary, Addr, Binary, Deps, DepsMut, Env, MessageInfo,
-    Response, StdError, StdResult,
+    attr, entry_point, from_binary, to_binary, Addr, BankMsg, Binary, CosmosMsg, Deps, DepsMut,
+    Env, MessageInfo, Response, StdError, StdResult, WasmMsg,
 };
 use cw2::set_contract_version;
 use cw20::{Balance, Cw20Coin, Cw20CoinVerified, Cw20ExecuteMsg, Cw20ReceiveMsg};
@@ -151,4 +151,68 @@ pub fn execute_top_up(
         ..Response::default()
     };
     Ok(res)
+}
+
+pub fn execute_approve(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    id: String,
+) -> Result<Response, ContractError> {
+    // this fails is no escrow there
+    let escrow = ESCROWS.load(deps.storage, &id)?;
+
+    if !escrow.validators.contains(&info.sender) {
+        Err(ContractError::Unauthorized {})
+    } else {
+        // we delete the escrow
+        ESCROWS.remove(deps.storage, &id);
+
+        // send all tokens out
+        let messages = send_tokens(&escrow.proposer, &escrow.balance)?;
+
+        let attributes = vec![
+            attr("action", "approve"),
+            attr("id", id),
+            attr("to", escrow.proposer),
+        ];
+        Ok(Response {
+            submessages: vec![],
+            messages,
+            attributes,
+            data: None,
+        })
+    }
+}
+
+fn send_tokens(to: &Addr, balance: &GenericBalance) -> StdResult<Vec<CosmosMsg>> {
+    let native_balance = &balance.native;
+    let mut msgs: Vec<CosmosMsg> = if native_balance.is_empty() {
+        vec![]
+    } else {
+        vec![BankMsg::Send {
+            to_address: to.into(),
+            amount: native_balance.to_vec(),
+        }
+        .into()]
+    };
+
+    let cw20_balance = &balance.cw20;
+    let cw20_msgs: StdResult<Vec<_>> = cw20_balance
+        .iter()
+        .map(|c| {
+            let msg = Cw20ExecuteMsg::Transfer {
+                recipient: to.into(),
+                amount: c.amount,
+            };
+            let exec = WasmMsg::Execute {
+                contract_addr: c.address.to_string(),
+                msg: to_binary(&msg)?,
+                send: vec![],
+            };
+            Ok(exec.into())
+        })
+        .collect();
+    msgs.append(&mut cw20_msgs?);
+    Ok(msgs)
 }
