@@ -1,13 +1,15 @@
 use crate::state::{all_escrow_ids, Escrow, GenericBalance, ESCROWS};
 use cosmwasm_std::{
-    attr, entry_point, to_binary, Addr, Binary, Deps, DepsMut, Env, MessageInfo, Response,
-    StdError, StdResult,
+    attr, entry_point, from_binary, to_binary, Addr, Binary, Deps, DepsMut, Env, MessageInfo,
+    Response, StdError, StdResult,
 };
 use cw2::set_contract_version;
-use cw20::Balance;
+use cw20::{Balance, Cw20Coin, Cw20CoinVerified, Cw20ExecuteMsg, Cw20ReceiveMsg};
 
 use crate::error::ContractError;
-use crate::msg::{CreateMsg, ExecuteMsg, InstantiateMsg};
+use crate::msg::{
+    CreateMsg, DetailsResponse, ExecuteMsg, InstantiateMsg, ListResponse, QueryMsg, ReceiveMsg,
+};
 use crate::state::Status;
 
 // version info for migration info
@@ -41,6 +43,25 @@ pub fn execute(
         ExecuteMsg::TopUp { id } => (),
         ExecuteMsg::Refund { id } => (),
         ExecuteMsg::Receive(msg) => (),
+    }
+}
+
+pub fn execute_receive(
+    deps: DepsMut,
+    info: MessageInfo,
+    wrapper: Cw20ReceiveMsg,
+) -> Result<Response, ContractError> {
+    let msg: ReceiveMsg = from_binary(&wrapper.msg)?;
+    let balance = Balance::Cw20(Cw20CoinVerified {
+        address: info.sender,
+        amount: wrapper.amount,
+    });
+    let api = deps.api;
+    match msg {
+        ReceiveMsg::Create(msg) => {
+            execute_create(deps, msg, balance, &api.addr_validate(&wrapper.sender)?)
+        }
+        ReceiveMsg::TopUp { id } => execute_top_up(deps, id, balance),
     }
 }
 
@@ -97,6 +118,36 @@ pub fn execute_create(
 
     let res = Response {
         attributes: vec![attr("action", "create"), attr("id", msg.id)],
+        ..Response::default()
+    };
+    Ok(res)
+}
+
+pub fn execute_top_up(
+    deps: DepsMut,
+    id: String,
+    balance: Balance,
+) -> Result<Response, ContractError> {
+    if balance.is_empty() {
+        return Err(ContractError::EmptyBalance {});
+    }
+    // this fails is no escrow there
+    let mut escrow = ESCROWS.load(deps.storage, &id)?;
+
+    if let Balance::Cw20(token) = &balance {
+        // ensure the token is on the whitelist
+        if !escrow.cw20_whitelist.iter().any(|t| t == &token.address) {
+            return Err(ContractError::NotInWhitelist {});
+        }
+    };
+
+    escrow.balance.add_tokens(balance);
+
+    // and save
+    ESCROWS.save(deps.storage, &id, &escrow)?;
+
+    let res = Response {
+        attributes: vec![attr("action", "top_up"), attr("id", id)],
         ..Response::default()
     };
     Ok(res)
