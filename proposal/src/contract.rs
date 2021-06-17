@@ -185,6 +185,39 @@ pub fn execute_approve(
     }
 }
 
+pub fn execute_refund(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    id: String,
+) -> Result<Response, ContractError> {
+    // this fails is no escrow there
+    let escrow = ESCROWS.load(deps.storage, &id)?;
+
+    // only a validator can decide to refund the escrowed funds (to DORIUM)
+    if !escrow.validators.contains(&info.sender) {
+        Err(ContractError::Unauthorized {})
+    } else {
+        // we delete the escrow
+        ESCROWS.remove(deps.storage, &id);
+
+        // send all tokens out
+        let messages = send_tokens(&escrow.source, &escrow.balance)?;
+
+        let attributes = vec![
+            attr("action", "refund"),
+            attr("id", id),
+            attr("to", escrow.source),
+        ];
+        Ok(Response {
+            submessages: vec![],
+            messages,
+            attributes,
+            data: None,
+        })
+    }
+}
+
 fn send_tokens(to: &Addr, balance: &GenericBalance) -> StdResult<Vec<CosmosMsg>> {
     let native_balance = &balance.native;
     let mut msgs: Vec<CosmosMsg> = if native_balance.is_empty() {
