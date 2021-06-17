@@ -54,8 +54,6 @@ pub struct CreateMsg {
     pub proposer: String,
     /// if refunded, funds go to the source (Dorium)
     pub source: String,
-    /// Balance in Native and Cw20 tokens
-    pub balance: GenericBalance,
     /// Besides any possible tokens sent with the CreateMsg, this is a list of all cw20 token addresses
     /// that are accepted by the escrow during a top-up. This is required to avoid a DoS attack by topping-up
     /// with an invalid cw20 contract. See https://github.com/CosmWasm/cosmwasm-plus/issues/19
@@ -103,11 +101,11 @@ pub struct DetailsResponse {
     /// more information about this proposal (URL to forum topic?)
     pub description: String,
     /// validators assigned by Dorium can decide to approve or refund the escrow
-    pub validators: Vec<Addr>,
+    pub validators: Vec<String>,
     /// if approved, funds go to the proposer
-    pub proposer: Addr,
+    pub proposer: String,
     /// if refunded, funds go to the source (Dorium)
-    pub source: Addr,
+    pub source: String,
     /// Balance in native tokens
     pub native_balance: Vec<Coin>,
     /// Balance in cw20 tokens

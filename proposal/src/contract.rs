@@ -262,7 +262,7 @@ fn query_details(deps: Deps, id: String) -> StdResult<DetailsResponse> {
     let escrow = ESCROWS.load(deps.storage, &id)?;
 
     let cw20_whitelist = escrow.human_whitelist();
-
+    let validators_str = escrow.human_validators();
     // transform tokens
     let native_balance = escrow.balance.native;
 
@@ -281,9 +281,9 @@ fn query_details(deps: Deps, id: String) -> StdResult<DetailsResponse> {
     let details = DetailsResponse {
         id,
         description: escrow.description,
-        validators: escrow.validators,
-        proposer: escrow.proposer,
-        source: escrow.source,
+        validators: validators_str,
+        proposer: escrow.proposer.to_string(),
+        source: escrow.source.to_string(),
         native_balance: native_balance,
         cw20_balance: cw20_balance?,
         cw20_whitelist: cw20_whitelist,
@@ -296,4 +296,329 @@ fn query_list(deps: Deps) -> StdResult<ListResponse> {
     Ok(ListResponse {
         escrows: all_escrow_ids(deps.storage)?,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
+    use cosmwasm_std::{coin, coins, CosmosMsg, StdError, Uint128};
+
+    use crate::msg::ExecuteMsg::TopUp;
+
+    use super::*;
+
+    #[test]
+    fn happy_path_native() {
+        let mut deps = mock_dependencies(&[]);
+
+        // instantiate an empty contract
+        let instantiate_msg = InstantiateMsg {};
+        let info = mock_info(&String::from("anyone"), &[]);
+        let res = instantiate(deps.as_mut(), mock_env(), info, instantiate_msg).unwrap();
+        assert_eq!(0, res.messages.len());
+
+        // create an escrow
+        let create = CreateMsg {
+            id: "foobar".to_string(),
+            description: String::from("foo of a bar of a escrow"),
+            validators: vec![String::from("validator1"), String::from("validator2")],
+            proposer: String::from("recd"),
+            source: String::from("dorium"),
+            cw20_whitelist: None,
+        };
+        let sender = String::from("dorium");
+        let balance = coins(100, "tokens");
+        let info = mock_info(&sender, &balance);
+        let msg = ExecuteMsg::Create(create.clone());
+        let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+        assert_eq!(0, res.messages.len());
+        assert_eq!(attr("action", "create"), res.attributes[0]);
+
+        // ensure the details is what we expect
+        let details = query_details(deps.as_ref(), "foobar".to_string()).unwrap();
+        assert_eq!(
+            details,
+            DetailsResponse {
+                id: "foobar".to_string(),
+                description: String::from("foo of a bar of a escrow"),
+                validators: vec![String::from("validator1"), String::from("validator2")],
+                proposer: String::from("recd"),
+                source: String::from("dorium"),
+                native_balance: balance.clone(),
+                cw20_balance: vec![],
+                cw20_whitelist: vec![],
+                status: Status::Opened {},
+            }
+        );
+
+        // approve it
+        let id = create.id.clone();
+        let info = mock_info(&create.validators[0], &[]);
+        let res = execute(deps.as_mut(), mock_env(), info, ExecuteMsg::Approve { id }).unwrap();
+        assert_eq!(1, res.messages.len());
+        assert_eq!(attr("action", "approve"), res.attributes[0]);
+        assert_eq!(
+            res.messages[0],
+            CosmosMsg::Bank(BankMsg::Send {
+                to_address: create.proposer,
+                amount: balance,
+            })
+        );
+
+        // second attempt fails (not found)
+        let id = create.id.clone();
+        let info = mock_info(&create.validators[0], &[]);
+        let err = execute(deps.as_mut(), mock_env(), info, ExecuteMsg::Approve { id }).unwrap_err();
+        assert!(matches!(err, ContractError::Std(StdError::NotFound { .. })));
+    }
+
+    #[test]
+    fn happy_path_cw20() {
+        let mut deps = mock_dependencies(&[]);
+
+        // instantiate an empty contract
+        let instantiate_msg = InstantiateMsg {};
+        let info = mock_info(&String::from("anyone"), &[]);
+        let res = instantiate(deps.as_mut(), mock_env(), info, instantiate_msg).unwrap();
+        assert_eq!(0, res.messages.len());
+
+        // create an escrow
+        let create = CreateMsg {
+            id: "foobar".to_string(),
+            description: String::from("foo to a bar"),
+            validators: vec![String::from("validator1"), String::from("validator2")],
+            proposer: String::from("recd"),
+            source: String::from("dorium"),
+            cw20_whitelist: Some(vec![String::from("other-token")]),
+        };
+        let receive = Cw20ReceiveMsg {
+            sender: String::from("dorium"),
+            amount: Uint128(100),
+            msg: to_binary(&ExecuteMsg::Create(create.clone())).unwrap(),
+        };
+        let token_contract = String::from("my-cw20-token");
+        let info = mock_info(&token_contract, &[]);
+        let msg = ExecuteMsg::Receive(receive.clone());
+        let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+        assert_eq!(0, res.messages.len());
+        assert_eq!(attr("action", "create"), res.attributes[0]);
+
+        // ensure the whitelist is what we expect
+        let details = query_details(deps.as_ref(), "foobar".to_string()).unwrap();
+        assert_eq!(
+            details,
+            DetailsResponse {
+                id: "foobar".to_string(),
+                description: String::from("foo to a bar"),
+                validators: vec![String::from("validator1"), String::from("validator2")],
+                proposer: String::from("recd"),
+                source: String::from("dorium"),
+                native_balance: vec![],
+                cw20_balance: vec![Cw20Coin {
+                    address: String::from("my-cw20-token"),
+                    amount: Uint128(100),
+                }],
+                cw20_whitelist: vec![String::from("other-token"), String::from("my-cw20-token")],
+                status: Status::Opened {},
+            }
+        );
+
+        // approve it
+        let id = create.id.clone();
+        let info = mock_info(&create.validators[0], &[]);
+        let res = execute(deps.as_mut(), mock_env(), info, ExecuteMsg::Approve { id }).unwrap();
+        assert_eq!(1, res.messages.len());
+        assert_eq!(attr("action", "approve"), res.attributes[0]);
+        let send_msg = Cw20ExecuteMsg::Transfer {
+            recipient: create.proposer,
+            amount: receive.amount,
+        };
+        assert_eq!(
+            res.messages[0],
+            CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: token_contract,
+                msg: to_binary(&send_msg).unwrap(),
+                send: vec![],
+            })
+        );
+
+        // second attempt fails (not found)
+        let id = create.id.clone();
+        let info = mock_info(&create.validators[0], &[]);
+        let err = execute(deps.as_mut(), mock_env(), info, ExecuteMsg::Approve { id }).unwrap_err();
+        assert!(matches!(err, ContractError::Std(StdError::NotFound { .. })));
+    }
+
+    #[test]
+    fn add_tokens_proper() {
+        let mut tokens = GenericBalance::default();
+        tokens.add_tokens(Balance::from(vec![coin(123, "atom"), coin(789, "eth")]));
+        tokens.add_tokens(Balance::from(vec![coin(456, "atom"), coin(12, "btc")]));
+        assert_eq!(
+            tokens.native,
+            vec![coin(579, "atom"), coin(789, "eth"), coin(12, "btc")]
+        );
+    }
+
+    #[test]
+    fn add_cw_tokens_proper() {
+        let mut tokens = GenericBalance::default();
+        let bar_token = Addr::unchecked("bar_token");
+        let foo_token = Addr::unchecked("foo_token");
+        tokens.add_tokens(Balance::Cw20(Cw20CoinVerified {
+            address: foo_token.clone(),
+            amount: Uint128(12345),
+        }));
+        tokens.add_tokens(Balance::Cw20(Cw20CoinVerified {
+            address: bar_token.clone(),
+            amount: Uint128(777),
+        }));
+        tokens.add_tokens(Balance::Cw20(Cw20CoinVerified {
+            address: foo_token.clone(),
+            amount: Uint128(23400),
+        }));
+        assert_eq!(
+            tokens.cw20,
+            vec![
+                Cw20CoinVerified {
+                    address: foo_token,
+                    amount: Uint128(35745),
+                },
+                Cw20CoinVerified {
+                    address: bar_token,
+                    amount: Uint128(777),
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn top_up_mixed_tokens() {
+        let mut deps = mock_dependencies(&[]);
+
+        // instantiate an empty contract
+        let instantiate_msg = InstantiateMsg {};
+        let info = mock_info(&String::from("anyone"), &[]);
+        let res = instantiate(deps.as_mut(), mock_env(), info, instantiate_msg).unwrap();
+        assert_eq!(0, res.messages.len());
+
+        // only accept these tokens
+        let whitelist = vec![String::from("bar_token"), String::from("foo_token")];
+
+        // create an escrow with 2 native tokens
+        let create = CreateMsg {
+            id: "foobar".to_string(),
+            description: String::from("foo to a bar"),
+            validators: vec![String::from("validator1"), String::from("validator2")],
+            proposer: String::from("recd"),
+            source: String::from("dorium"),
+            cw20_whitelist: Some(whitelist),
+        };
+        let sender = String::from("source");
+        let balance = vec![coin(100, "fee"), coin(200, "stake")];
+        let info = mock_info(&sender, &balance);
+        let msg = ExecuteMsg::Create(create.clone());
+        let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+        assert_eq!(0, res.messages.len());
+        assert_eq!(attr("action", "create"), res.attributes[0]);
+
+        // top it up with 2 more native tokens
+        let extra_native = vec![coin(250, "random"), coin(300, "stake")];
+        let info = mock_info(&sender, &extra_native);
+        let top_up = ExecuteMsg::TopUp {
+            id: create.id.clone(),
+        };
+        let res = execute(deps.as_mut(), mock_env(), info, top_up).unwrap();
+        assert_eq!(0, res.messages.len());
+        assert_eq!(attr("action", "top_up"), res.attributes[0]);
+
+        // top up with one foreign token
+        let bar_token = String::from("bar_token");
+        let base = TopUp {
+            id: create.id.clone(),
+        };
+        let top_up = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: String::from("random"),
+            amount: Uint128(7890),
+            msg: to_binary(&base).unwrap(),
+        });
+        let info = mock_info(&bar_token, &[]);
+        let res = execute(deps.as_mut(), mock_env(), info, top_up).unwrap();
+        assert_eq!(0, res.messages.len());
+        assert_eq!(attr("action", "top_up"), res.attributes[0]);
+
+        // top with a foreign token not on the whitelist
+        // top up with one foreign token
+        let baz_token = String::from("baz_token");
+        let base = TopUp {
+            id: create.id.clone(),
+        };
+        let top_up = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: String::from("random"),
+            amount: Uint128(7890),
+            msg: to_binary(&base).unwrap(),
+        });
+        let info = mock_info(&baz_token, &[]);
+        let err = execute(deps.as_mut(), mock_env(), info, top_up).unwrap_err();
+        assert_eq!(err, ContractError::NotInWhitelist {});
+
+        // top up with second foreign token
+        let foo_token = String::from("foo_token");
+        let base = TopUp {
+            id: create.id.clone(),
+        };
+        let top_up = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: String::from("random"),
+            amount: Uint128(888),
+            msg: to_binary(&base).unwrap(),
+        });
+        let info = mock_info(&foo_token, &[]);
+        let res = execute(deps.as_mut(), mock_env(), info, top_up).unwrap();
+        assert_eq!(0, res.messages.len());
+        assert_eq!(attr("action", "top_up"), res.attributes[0]);
+
+        // approve it
+        let id = create.id.clone();
+        let info = mock_info(&create.validators[0], &[]);
+        let res = execute(deps.as_mut(), mock_env(), info, ExecuteMsg::Approve { id }).unwrap();
+        assert_eq!(attr("action", "approve"), res.attributes[0]);
+        assert_eq!(3, res.messages.len());
+
+        // first message releases all native coins
+        assert_eq!(
+            res.messages[0],
+            CosmosMsg::Bank(BankMsg::Send {
+                to_address: create.proposer.clone(),
+                amount: vec![coin(100, "fee"), coin(500, "stake"), coin(250, "random")],
+            })
+        );
+
+        // second one release bar cw20 token
+        let send_msg = Cw20ExecuteMsg::Transfer {
+            recipient: create.proposer.clone(),
+            amount: Uint128(7890),
+        };
+        assert_eq!(
+            res.messages[1],
+            CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: bar_token,
+                msg: to_binary(&send_msg).unwrap(),
+                send: vec![],
+            })
+        );
+
+        // third one release foo cw20 token
+        let send_msg = Cw20ExecuteMsg::Transfer {
+            recipient: create.proposer,
+            amount: Uint128(888),
+        };
+        assert_eq!(
+            res.messages[2],
+            CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: foo_token,
+                msg: to_binary(&send_msg).unwrap(),
+                send: vec![],
+            })
+        );
+    }
 }

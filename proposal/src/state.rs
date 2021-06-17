@@ -79,6 +79,10 @@ impl Escrow {
     pub fn human_whitelist(&self) -> Vec<String> {
         self.cw20_whitelist.iter().map(|a| a.to_string()).collect()
     }
+
+    pub fn human_validators(&self) -> Vec<String> {
+        self.validators.iter().map(|a| a.to_string()).collect()
+    }
 }
 
 pub const ESCROWS: Map<&str, Escrow> = Map::new("escrow");
