@@ -1,13 +1,23 @@
 use cosmwasm_std::StdError;
 use thiserror::Error;
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, PartialEq)]
 pub enum ContractError {
     #[error("{0}")]
     Std(#[from] StdError),
 
     #[error("Unauthorized")]
     Unauthorized {},
-    // Add any other custom errors you like here.
-    // Look at https://docs.rs/thiserror/1.0.21/thiserror/ for details.
+
+    #[error("Only accepts tokens in the cw20_whitelist")]
+    NotInWhitelist {},
+
+    #[error("Escrow is expired")]
+    Expired {},
+
+    #[error("Send some coins to create an escrow")]
+    EmptyBalance {},
+
+    #[error("Escrow id already in use")]
+    AlreadyInUse {},
 }

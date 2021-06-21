@@ -1,248 +1,624 @@
+use crate::state::{all_escrow_ids, Escrow, GenericBalance, ESCROWS};
 use cosmwasm_std::{
-    entry_point, to_binary, Addr, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdError,
-    StdResult,
+    attr, entry_point, from_binary, to_binary, Addr, BankMsg, Binary, CosmosMsg, Deps, DepsMut,
+    Env, MessageInfo, Response, StdError, StdResult, WasmMsg,
 };
+use cw2::set_contract_version;
+use cw20::{Balance, Cw20Coin, Cw20CoinVerified, Cw20ExecuteMsg, Cw20ReceiveMsg};
 
-use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg, StateResponse};
-use crate::state::{State, STATE};
-use crate::{error::ContractError, state::Status};
+use crate::error::ContractError;
+use crate::msg::{
+    CreateMsg, DetailsResponse, ExecuteMsg, InstantiateMsg, ListResponse, QueryMsg, ReceiveMsg,
+};
+use crate::state::Status;
 
-// Note, you can use StdResult in some functions where you do not
-// make use of the custom errors
-#[entry_point]
+// version info for migration info
+const CONTRACT_NAME: &str = "dorium-community-proposal";
+const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+#[cfg_attr(not(feature = "library"), entry_point)]
 pub fn instantiate(
     deps: DepsMut,
     _env: Env,
-    info: MessageInfo,
-    msg: InstantiateMsg,
-) -> Result<Response, ContractError> {
-    let state = State {
-        admin: info.sender,
-        proposer: msg.proposer,
-        budget: msg.budget,
-        validators: msg.validators,
-        status: crate::state::Status::Opened {},
-    };
-    STATE.save(deps.storage, &state)?;
-
+    _info: MessageInfo,
+    _msg: InstantiateMsg,
+) -> StdResult<Response> {
+    set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
+    // no setup
     Ok(Response::default())
 }
 
-// And declare a custom Error variant for the ones where you will want to make use of it
-#[entry_point]
+#[cfg_attr(not(feature = "library"), entry_point)]
 pub fn execute(
     deps: DepsMut,
-    _env: Env,
+    env: Env,
     info: MessageInfo,
     msg: ExecuteMsg,
 ) -> Result<Response, ContractError> {
     match msg {
-        ExecuteMsg::SetStatus { s } => try_set_status(deps, info, s),
-        // only DORIUM can add/remove validators
-        ExecuteMsg::AddValidator { addr } => try_add_validator(deps, info, addr),
-        ExecuteMsg::RmValidator { addr } => try_rm_validator(deps, info, addr),
+        ExecuteMsg::Create(msg) => {
+            execute_create(deps, msg, Balance::from(info.funds), &info.sender)
+        }
+        ExecuteMsg::Approve { id } => execute_approve(deps, env, info, id),
+        ExecuteMsg::TopUp { id } => execute_top_up(deps, id, Balance::from(info.funds)),
+        ExecuteMsg::Refund { id } => execute_refund(deps, env, info, id),
+        ExecuteMsg::Receive(msg) => execute_receive(deps, info, msg),
     }
 }
 
-pub fn try_set_status(
+pub fn execute_receive(
     deps: DepsMut,
     info: MessageInfo,
-    status: Status,
+    wrapper: Cw20ReceiveMsg,
 ) -> Result<Response, ContractError> {
-    STATE.update(deps.storage, |mut state| -> Result<_, ContractError> {
-        // only validators can update the state of a Proposal
-        if !state.validators.contains(&info.sender) {
-            return Err(ContractError::Unauthorized {});
+    let msg: ReceiveMsg = from_binary(&wrapper.msg)?;
+    let balance = Balance::Cw20(Cw20CoinVerified {
+        address: info.sender,
+        amount: wrapper.amount,
+    });
+    let api = deps.api;
+    match msg {
+        ReceiveMsg::Create(msg) => {
+            execute_create(deps, msg, balance, &api.addr_validate(&wrapper.sender)?)
         }
-        state.status = status;
-        Ok(state)
-    })?;
-
-    Ok(Response::default())
+        ReceiveMsg::TopUp { id } => execute_top_up(deps, id, balance),
+    }
 }
 
-pub fn try_add_validator(
+pub fn execute_create(
     deps: DepsMut,
-    info: MessageInfo,
-    validator: Addr,
+    msg: CreateMsg,
+    balance: Balance,
+    sender: &Addr,
 ) -> Result<Response, ContractError> {
-    STATE.update(deps.storage, |mut state| -> Result<_, ContractError> {
-        // only DORIUM can add/remove validators to a Proposal
-        if info.sender != state.admin {
-            return Err(ContractError::Unauthorized {});
-        }
+    if balance.is_empty() {
+        return Err(ContractError::EmptyBalance {});
+    }
 
-        // check that the address to be added isn't already in there
-        if state.validators.contains(&validator) {
-            return Err(ContractError::Std(StdError::generic_err(
-                "Validator is already registered",
-            )));
-        }
+    let mut cw20_whitelist = msg.addr_whitelist(deps.api)?;
 
-        state.validators.push(validator);
-        Ok(state)
-    })?;
-    Ok(Response::default())
-}
-
-pub fn try_rm_validator(
-    deps: DepsMut,
-    info: MessageInfo,
-    validator: Addr,
-) -> Result<Response, ContractError> {
-    STATE.update(deps.storage, |mut state| -> Result<_, ContractError> {
-        // only DORIUM can add/remove validators to a Proposal
-        if info.sender != state.admin {
-            return Err(ContractError::Unauthorized {});
-        }
-
-        // check that the address to be added isn't already in there
-        match state.validators.iter().position(|v| *v == validator) {
-            Some(i) => {
-                state.validators.remove(i);
+    let escrow_balance = match balance {
+        Balance::Native(balance) => GenericBalance {
+            native: balance.0,
+            cw20: vec![],
+        },
+        Balance::Cw20(token) => {
+            // make sure the token sent is on the whitelist by default
+            if !cw20_whitelist.iter().any(|t| t == &token.address) {
+                cw20_whitelist.push(token.address.clone())
             }
-            None => {
-                return Err(
-                    StdError::generic_err("Validator was not registered as a validator").into(),
-                )
+            GenericBalance {
+                native: vec![],
+                cw20: vec![token],
             }
         }
-        Ok(state)
+    };
+
+    let mut validators: Vec<Addr> = vec![];
+    for addr in msg.validators {
+        validators.push(deps.api.addr_validate(&addr)?)
+    }
+
+    let escrow = Escrow {
+        id: msg.id.clone(),
+        description: msg.description,
+        validators: validators,
+        proposer: deps.api.addr_validate(&msg.proposer)?,
+        source: sender.clone(),
+        balance: escrow_balance,
+        cw20_whitelist,
+        status: Status::Opened {},
+    };
+
+    // try to store it, fail if the id was already in use
+    ESCROWS.update(deps.storage, &msg.id, |existing| match existing {
+        None => Ok(escrow),
+        Some(_) => Err(ContractError::AlreadyInUse {}),
     })?;
-    Ok(Response::default())
+
+    let res = Response {
+        attributes: vec![attr("action", "create"), attr("id", msg.id)],
+        ..Response::default()
+    };
+    Ok(res)
 }
 
-#[entry_point]
+pub fn execute_top_up(
+    deps: DepsMut,
+    id: String,
+    balance: Balance,
+) -> Result<Response, ContractError> {
+    if balance.is_empty() {
+        return Err(ContractError::EmptyBalance {});
+    }
+    // this fails is no escrow there
+    let mut escrow = ESCROWS.load(deps.storage, &id)?;
+
+    if let Balance::Cw20(token) = &balance {
+        // ensure the token is on the whitelist
+        if !escrow.cw20_whitelist.iter().any(|t| t == &token.address) {
+            return Err(ContractError::NotInWhitelist {});
+        }
+    };
+
+    escrow.balance.add_tokens(balance);
+
+    // and save
+    ESCROWS.save(deps.storage, &id, &escrow)?;
+
+    let res = Response {
+        attributes: vec![attr("action", "top_up"), attr("id", id)],
+        ..Response::default()
+    };
+    Ok(res)
+}
+
+pub fn execute_approve(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    id: String,
+) -> Result<Response, ContractError> {
+    // this fails is no escrow there
+    let escrow = ESCROWS.load(deps.storage, &id)?;
+
+    if !escrow.validators.contains(&info.sender) {
+        Err(ContractError::Unauthorized {})
+    } else {
+        // we delete the escrow
+        ESCROWS.remove(deps.storage, &id);
+
+        // send all tokens out
+        let messages = send_tokens(&escrow.proposer, &escrow.balance)?;
+
+        let attributes = vec![
+            attr("action", "approve"),
+            attr("id", id),
+            attr("to", escrow.proposer),
+        ];
+        Ok(Response {
+            submessages: vec![],
+            messages,
+            attributes,
+            data: None,
+        })
+    }
+}
+
+pub fn execute_refund(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    id: String,
+) -> Result<Response, ContractError> {
+    // this fails is no escrow there
+    let escrow = ESCROWS.load(deps.storage, &id)?;
+
+    // only a validator can decide to refund the escrowed funds (to DORIUM)
+    if !escrow.validators.contains(&info.sender) {
+        Err(ContractError::Unauthorized {})
+    } else {
+        // we delete the escrow
+        ESCROWS.remove(deps.storage, &id);
+
+        // send all tokens out
+        let messages = send_tokens(&escrow.source, &escrow.balance)?;
+
+        let attributes = vec![
+            attr("action", "refund"),
+            attr("id", id),
+            attr("to", escrow.source),
+        ];
+        Ok(Response {
+            submessages: vec![],
+            messages,
+            attributes,
+            data: None,
+        })
+    }
+}
+
+fn send_tokens(to: &Addr, balance: &GenericBalance) -> StdResult<Vec<CosmosMsg>> {
+    let native_balance = &balance.native;
+    let mut msgs: Vec<CosmosMsg> = if native_balance.is_empty() {
+        vec![]
+    } else {
+        vec![BankMsg::Send {
+            to_address: to.into(),
+            amount: native_balance.to_vec(),
+        }
+        .into()]
+    };
+
+    let cw20_balance = &balance.cw20;
+    let cw20_msgs: StdResult<Vec<_>> = cw20_balance
+        .iter()
+        .map(|c| {
+            let msg = Cw20ExecuteMsg::Transfer {
+                recipient: to.into(),
+                amount: c.amount,
+            };
+            let exec = WasmMsg::Execute {
+                contract_addr: c.address.to_string(),
+                msg: to_binary(&msg)?,
+                send: vec![],
+            };
+            Ok(exec.into())
+        })
+        .collect();
+    msgs.append(&mut cw20_msgs?);
+    Ok(msgs)
+}
+
+#[cfg_attr(not(feature = "library"), entry_point)]
 pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
-        QueryMsg::GetState {} => to_binary(&query_state(deps)?),
+        QueryMsg::List {} => to_binary(&query_list(deps)?),
+        QueryMsg::Details { id } => to_binary(&query_details(deps, id)?),
     }
 }
 
-fn query_state(deps: Deps) -> StdResult<StateResponse> {
-    let state = STATE.load(deps.storage)?;
-    Ok(StateResponse { state: state })
+fn query_details(deps: Deps, id: String) -> StdResult<DetailsResponse> {
+    let escrow = ESCROWS.load(deps.storage, &id)?;
+
+    let cw20_whitelist = escrow.human_whitelist();
+    let validators_str = escrow.human_validators();
+    // transform tokens
+    let native_balance = escrow.balance.native;
+
+    let cw20_balance: StdResult<Vec<_>> = escrow
+        .balance
+        .cw20
+        .into_iter()
+        .map(|token| {
+            Ok(Cw20Coin {
+                address: token.address.into(),
+                amount: token.amount,
+            })
+        })
+        .collect();
+
+    let details = DetailsResponse {
+        id,
+        description: escrow.description,
+        validators: validators_str,
+        proposer: escrow.proposer.to_string(),
+        source: escrow.source.to_string(),
+        native_balance: native_balance,
+        cw20_balance: cw20_balance?,
+        cw20_whitelist: cw20_whitelist,
+        status: escrow.status,
+    };
+    Ok(details)
+}
+
+fn query_list(deps: Deps) -> StdResult<ListResponse> {
+    Ok(ListResponse {
+        escrows: all_escrow_ids(deps.storage)?,
+    })
 }
 
 #[cfg(test)]
 mod tests {
+    use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
+    use cosmwasm_std::{coin, coins, CosmosMsg, StdError, Uint128};
+
+    use crate::msg::ExecuteMsg::TopUp;
+
     use super::*;
-    use cosmwasm_std::{coins, from_binary, Uint128};
-    use cosmwasm_std::{
-        testing::{mock_dependencies, mock_env, mock_info},
-        Coin,
-    };
 
     #[test]
-    fn proper_initialization() {
+    fn happy_path_native() {
         let mut deps = mock_dependencies(&[]);
-        let vs = vec![Addr::unchecked("validator1"), Addr::unchecked("validator2")];
-        let msg = InstantiateMsg {
-            proposer: Addr::unchecked("proposer"),
-            budget: Coin {
-                amount: Uint128(1000),
-                denom: "BTC".into(),
-            },
-            validators: vs,
-        };
-        let info = mock_info("creator", &coins(1000, "earth"));
 
-        // we can just call .unwrap() to assert this was a success
-        let res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
+        // instantiate an empty contract
+        let instantiate_msg = InstantiateMsg {};
+        let info = mock_info(&String::from("anyone"), &[]);
+        let res = instantiate(deps.as_mut(), mock_env(), info, instantiate_msg).unwrap();
         assert_eq!(0, res.messages.len());
 
-        // it worked, let's query the state
-        let res = query(deps.as_ref(), mock_env(), QueryMsg::GetState {}).unwrap();
-        let s: StateResponse = from_binary(&res).unwrap();
-        let state: State = s.state;
-        println!("{:?}", state);
-        let state_reference = State {
-            admin: Addr::unchecked("creator"),
-            proposer: Addr::unchecked("proposer"),
-            budget: Coin {
-                denom: "BTC".into(),
-                amount: Uint128(1000),
-            },
-            validators: vec![Addr::unchecked("validator1"), Addr::unchecked("validator2")],
-            status: Status::Opened {},
+        // create an escrow
+        let create = CreateMsg {
+            id: "foobar".to_string(),
+            description: String::from("foo of a bar of a escrow"),
+            validators: vec![String::from("validator1"), String::from("validator2")],
+            proposer: String::from("recd"),
+            source: String::from("dorium"),
+            cw20_whitelist: None,
         };
-        assert_eq!(state, state_reference);
+        let sender = String::from("dorium");
+        let balance = coins(100, "tokens");
+        let info = mock_info(&sender, &balance);
+        let msg = ExecuteMsg::Create(create.clone());
+        let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+        assert_eq!(0, res.messages.len());
+        assert_eq!(attr("action", "create"), res.attributes[0]);
+
+        // ensure the details is what we expect
+        let details = query_details(deps.as_ref(), "foobar".to_string()).unwrap();
+        assert_eq!(
+            details,
+            DetailsResponse {
+                id: "foobar".to_string(),
+                description: String::from("foo of a bar of a escrow"),
+                validators: vec![String::from("validator1"), String::from("validator2")],
+                proposer: String::from("recd"),
+                source: String::from("dorium"),
+                native_balance: balance.clone(),
+                cw20_balance: vec![],
+                cw20_whitelist: vec![],
+                status: Status::Opened {},
+            }
+        );
+
+        // approve it
+        let id = create.id.clone();
+        let info = mock_info(&create.validators[0], &[]);
+        let res = execute(deps.as_mut(), mock_env(), info, ExecuteMsg::Approve { id }).unwrap();
+        assert_eq!(1, res.messages.len());
+        assert_eq!(attr("action", "approve"), res.attributes[0]);
+        assert_eq!(
+            res.messages[0],
+            CosmosMsg::Bank(BankMsg::Send {
+                to_address: create.proposer,
+                amount: balance,
+            })
+        );
+
+        // second attempt fails (not found)
+        let id = create.id.clone();
+        let info = mock_info(&create.validators[0], &[]);
+        let err = execute(deps.as_mut(), mock_env(), info, ExecuteMsg::Approve { id }).unwrap_err();
+        assert!(matches!(err, ContractError::Std(StdError::NotFound { .. })));
     }
 
     #[test]
-    fn set_status() {
+    fn happy_path_cw20() {
         let mut deps = mock_dependencies(&[]);
-        let vs = vec![Addr::unchecked("validator1"), Addr::unchecked("validator2")];
-        let msg = InstantiateMsg {
-            proposer: Addr::unchecked("proposer"),
-            budget: Coin {
-                amount: Uint128(1000),
-                denom: "BTC".into(),
-            },
-            validators: vs,
-        };
-        let info = mock_info("creator", &coins(1000, "earth"));
 
-        // we can just call .unwrap() to assert this was a success
-        let res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
+        // instantiate an empty contract
+        let instantiate_msg = InstantiateMsg {};
+        let info = mock_info(&String::from("anyone"), &[]);
+        let res = instantiate(deps.as_mut(), mock_env(), info, instantiate_msg).unwrap();
         assert_eq!(0, res.messages.len());
 
-        // validators can change the Proposal's status
-        let info = mock_info("validator1", &coins(2, "earth"));
-        let msg = ExecuteMsg::SetStatus {
-            s: Status::InProgress {},
+        // create an escrow
+        let create = CreateMsg {
+            id: "foobar".to_string(),
+            description: String::from("foo to a bar"),
+            validators: vec![String::from("validator1"), String::from("validator2")],
+            proposer: String::from("recd"),
+            source: String::from("dorium"),
+            cw20_whitelist: Some(vec![String::from("other-token")]),
         };
-        let _res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
-        let sr = query_state(deps.as_ref()).unwrap();
-        assert_eq!(sr.state.status, Status::InProgress {});
+        let receive = Cw20ReceiveMsg {
+            sender: String::from("dorium"),
+            amount: Uint128(100),
+            msg: to_binary(&ExecuteMsg::Create(create.clone())).unwrap(),
+        };
+        let token_contract = String::from("my-cw20-token");
+        let info = mock_info(&token_contract, &[]);
+        let msg = ExecuteMsg::Receive(receive.clone());
+        let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+        assert_eq!(0, res.messages.len());
+        assert_eq!(attr("action", "create"), res.attributes[0]);
 
-        let info = mock_info("validator2", &coins(2, "earth"));
-        let msg = ExecuteMsg::SetStatus {
-            s: Status::Validated {},
-        };
-        let _res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
-        let sr = query_state(deps.as_ref()).unwrap();
-        assert_eq!(sr.state.status, Status::Validated {});
+        // ensure the whitelist is what we expect
+        let details = query_details(deps.as_ref(), "foobar".to_string()).unwrap();
+        assert_eq!(
+            details,
+            DetailsResponse {
+                id: "foobar".to_string(),
+                description: String::from("foo to a bar"),
+                validators: vec![String::from("validator1"), String::from("validator2")],
+                proposer: String::from("recd"),
+                source: String::from("dorium"),
+                native_balance: vec![],
+                cw20_balance: vec![Cw20Coin {
+                    address: String::from("my-cw20-token"),
+                    amount: Uint128(100),
+                }],
+                cw20_whitelist: vec![String::from("other-token"), String::from("my-cw20-token")],
+                status: Status::Opened {},
+            }
+        );
 
-        // unknown validator cannot change the status
-        let info = mock_info("validator3", &coins(2, "earth"));
-        let msg = ExecuteMsg::SetStatus {
-            s: Status::Opened {},
+        // approve it
+        let id = create.id.clone();
+        let info = mock_info(&create.validators[0], &[]);
+        let res = execute(deps.as_mut(), mock_env(), info, ExecuteMsg::Approve { id }).unwrap();
+        assert_eq!(1, res.messages.len());
+        assert_eq!(attr("action", "approve"), res.attributes[0]);
+        let send_msg = Cw20ExecuteMsg::Transfer {
+            recipient: create.proposer,
+            amount: receive.amount,
         };
-        let err = execute(deps.as_mut(), mock_env(), info.clone(), msg.clone()).unwrap_err();
-        match err {
-            ContractError::Unauthorized { .. } => {}
-            e => panic!("unexpected error: {}", e),
-        }
-        let sr = query_state(deps.as_ref()).unwrap();
-        assert_eq!(sr.state.status, Status::Validated {});
+        assert_eq!(
+            res.messages[0],
+            CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: token_contract,
+                msg: to_binary(&send_msg).unwrap(),
+                send: vec![],
+            })
+        );
+
+        // second attempt fails (not found)
+        let id = create.id.clone();
+        let info = mock_info(&create.validators[0], &[]);
+        let err = execute(deps.as_mut(), mock_env(), info, ExecuteMsg::Approve { id }).unwrap_err();
+        assert!(matches!(err, ContractError::Std(StdError::NotFound { .. })));
     }
 
-    // #[test]
-    // fn reset() {
-    //     let mut deps = mock_dependencies(&coins(2, "token"));
+    #[test]
+    fn add_tokens_proper() {
+        let mut tokens = GenericBalance::default();
+        tokens.add_tokens(Balance::from(vec![coin(123, "atom"), coin(789, "eth")]));
+        tokens.add_tokens(Balance::from(vec![coin(456, "atom"), coin(12, "btc")]));
+        assert_eq!(
+            tokens.native,
+            vec![coin(579, "atom"), coin(789, "eth"), coin(12, "btc")]
+        );
+    }
 
-    //     let msg = InstantiateMsg { count: 17 };
-    //     let info = mock_info("creator", &coins(2, "token"));
-    //     let _res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
+    #[test]
+    fn add_cw_tokens_proper() {
+        let mut tokens = GenericBalance::default();
+        let bar_token = Addr::unchecked("bar_token");
+        let foo_token = Addr::unchecked("foo_token");
+        tokens.add_tokens(Balance::Cw20(Cw20CoinVerified {
+            address: foo_token.clone(),
+            amount: Uint128(12345),
+        }));
+        tokens.add_tokens(Balance::Cw20(Cw20CoinVerified {
+            address: bar_token.clone(),
+            amount: Uint128(777),
+        }));
+        tokens.add_tokens(Balance::Cw20(Cw20CoinVerified {
+            address: foo_token.clone(),
+            amount: Uint128(23400),
+        }));
+        assert_eq!(
+            tokens.cw20,
+            vec![
+                Cw20CoinVerified {
+                    address: foo_token,
+                    amount: Uint128(35745),
+                },
+                Cw20CoinVerified {
+                    address: bar_token,
+                    amount: Uint128(777),
+                }
+            ]
+        );
+    }
 
-    //     // beneficiary can release it
-    //     let unauth_info = mock_info("anyone", &coins(2, "token"));
-    //     let msg = ExecuteMsg::Reset { count: 5 };
-    //     let res = execute(deps.as_mut(), mock_env(), unauth_info, msg);
-    //     match res {
-    //         Err(ContractError::Unauthorized {}) => {}
-    //         _ => panic!("Must return unauthorized error"),
-    //     }
+    #[test]
+    fn top_up_mixed_tokens() {
+        let mut deps = mock_dependencies(&[]);
 
-    //     // only the original creator can reset the counter
-    //     let auth_info = mock_info("creator", &coins(2, "token"));
-    //     let msg = ExecuteMsg::Reset { count: 5 };
-    //     let _res = execute(deps.as_mut(), mock_env(), auth_info, msg).unwrap();
+        // instantiate an empty contract
+        let instantiate_msg = InstantiateMsg {};
+        let info = mock_info(&String::from("anyone"), &[]);
+        let res = instantiate(deps.as_mut(), mock_env(), info, instantiate_msg).unwrap();
+        assert_eq!(0, res.messages.len());
 
-    //     // should now be 5
-    //     let res = query(deps.as_ref(), mock_env(), QueryMsg::GetCount {}).unwrap();
-    //     let value: CountResponse = from_binary(&res).unwrap();
-    //     assert_eq!(5, value.count);
-    // }
+        // only accept these tokens
+        let whitelist = vec![String::from("bar_token"), String::from("foo_token")];
+
+        // create an escrow with 2 native tokens
+        let create = CreateMsg {
+            id: "foobar".to_string(),
+            description: String::from("foo to a bar"),
+            validators: vec![String::from("validator1"), String::from("validator2")],
+            proposer: String::from("recd"),
+            source: String::from("dorium"),
+            cw20_whitelist: Some(whitelist),
+        };
+        let sender = String::from("source");
+        let balance = vec![coin(100, "fee"), coin(200, "stake")];
+        let info = mock_info(&sender, &balance);
+        let msg = ExecuteMsg::Create(create.clone());
+        let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+        assert_eq!(0, res.messages.len());
+        assert_eq!(attr("action", "create"), res.attributes[0]);
+
+        // top it up with 2 more native tokens
+        let extra_native = vec![coin(250, "random"), coin(300, "stake")];
+        let info = mock_info(&sender, &extra_native);
+        let top_up = ExecuteMsg::TopUp {
+            id: create.id.clone(),
+        };
+        let res = execute(deps.as_mut(), mock_env(), info, top_up).unwrap();
+        assert_eq!(0, res.messages.len());
+        assert_eq!(attr("action", "top_up"), res.attributes[0]);
+
+        // top up with one foreign token
+        let bar_token = String::from("bar_token");
+        let base = TopUp {
+            id: create.id.clone(),
+        };
+        let top_up = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: String::from("random"),
+            amount: Uint128(7890),
+            msg: to_binary(&base).unwrap(),
+        });
+        let info = mock_info(&bar_token, &[]);
+        let res = execute(deps.as_mut(), mock_env(), info, top_up).unwrap();
+        assert_eq!(0, res.messages.len());
+        assert_eq!(attr("action", "top_up"), res.attributes[0]);
+
+        // top with a foreign token not on the whitelist
+        // top up with one foreign token
+        let baz_token = String::from("baz_token");
+        let base = TopUp {
+            id: create.id.clone(),
+        };
+        let top_up = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: String::from("random"),
+            amount: Uint128(7890),
+            msg: to_binary(&base).unwrap(),
+        });
+        let info = mock_info(&baz_token, &[]);
+        let err = execute(deps.as_mut(), mock_env(), info, top_up).unwrap_err();
+        assert_eq!(err, ContractError::NotInWhitelist {});
+
+        // top up with second foreign token
+        let foo_token = String::from("foo_token");
+        let base = TopUp {
+            id: create.id.clone(),
+        };
+        let top_up = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: String::from("random"),
+            amount: Uint128(888),
+            msg: to_binary(&base).unwrap(),
+        });
+        let info = mock_info(&foo_token, &[]);
+        let res = execute(deps.as_mut(), mock_env(), info, top_up).unwrap();
+        assert_eq!(0, res.messages.len());
+        assert_eq!(attr("action", "top_up"), res.attributes[0]);
+
+        // approve it
+        let id = create.id.clone();
+        let info = mock_info(&create.validators[0], &[]);
+        let res = execute(deps.as_mut(), mock_env(), info, ExecuteMsg::Approve { id }).unwrap();
+        assert_eq!(attr("action", "approve"), res.attributes[0]);
+        assert_eq!(3, res.messages.len());
+
+        // first message releases all native coins
+        assert_eq!(
+            res.messages[0],
+            CosmosMsg::Bank(BankMsg::Send {
+                to_address: create.proposer.clone(),
+                amount: vec![coin(100, "fee"), coin(500, "stake"), coin(250, "random")],
+            })
+        );
+
+        // second one release bar cw20 token
+        let send_msg = Cw20ExecuteMsg::Transfer {
+            recipient: create.proposer.clone(),
+            amount: Uint128(7890),
+        };
+        assert_eq!(
+            res.messages[1],
+            CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: bar_token,
+                msg: to_binary(&send_msg).unwrap(),
+                send: vec![],
+            })
+        );
+
+        // third one release foo cw20 token
+        let send_msg = Cw20ExecuteMsg::Transfer {
+            recipient: create.proposer,
+            amount: Uint128(888),
+        };
+        assert_eq!(
+            res.messages[2],
+            CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: foo_token,
+                msg: to_binary(&send_msg).unwrap(),
+                send: vec![],
+            })
+        );
+    }
 }
