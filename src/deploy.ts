@@ -7,9 +7,9 @@ import { SigningCosmWasmClient } from '@cosmjs/cosmwasm-stargate';
 config();
 
 const { ERC20_CONTRACT, DORIUM_PROPOSAL_CONTRACT, MNEMONIC_MAIN, RPC_ENDPOINT } = process.env;
-const options = { prefix: 'wasm' };
-const ERC20Contract: Buffer = fs.readFileSync(ERC20_CONTRACT);
-const ProposalContract: Buffer = fs.readFileSync(DORIUM_PROPOSAL_CONTRACT);
+const options = { prefix: "wasm" };
+const ERC20Contract = fs.readFileSync(ERC20_CONTRACT)
+const ProposalContract = fs.readFileSync(DORIUM_PROPOSAL_CONTRACT);
 
 async function getWalletData() {
 	return await DirectSecp256k1HdWallet.fromMnemonic(MNEMONIC_MAIN, options);
