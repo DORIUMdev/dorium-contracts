@@ -1,28 +1,67 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "State",
+  "title": "Escrow",
   "type": "object",
   "required": [
-    "admin",
-    "budget",
+    "balance",
+    "cw20_whitelist",
+    "description",
+    "id",
     "proposer",
+    "source",
     "status",
     "validators"
   ],
   "properties": {
-    "admin": {
-      "$ref": "#/definitions/Addr"
+    "balance": {
+      "description": "Balance in Native and Cw20 tokens",
+      "allOf": [
+        {
+          "$ref": "#/definitions/GenericBalance"
+        }
+      ]
     },
-    "budget": {
-      "$ref": "#/definitions/Coin"
+    "cw20_whitelist": {
+      "description": "All possible contracts that we accept tokens from",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/Addr"
+      }
+    },
+    "description": {
+      "description": "more information about this proposal (URL to forum topic?)",
+      "type": "string"
+    },
+    "id": {
+      "description": "id is a human-readable name. It is the key in the mapping to store the Escrow state, so it cannot be changed. 3-20 bytes of utf-8 text",
+      "type": "string"
     },
     "proposer": {
-      "$ref": "#/definitions/Addr"
+      "description": "if approved, funds go to the proposer",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Addr"
+        }
+      ]
+    },
+    "source": {
+      "description": "if refunded, funds go to the source (Dorium)",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Addr"
+        }
+      ]
     },
     "status": {
-      "$ref": "#/definitions/Status"
+      "description": "status of the proposal (enum: opened, in progress, canceled, completed)",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Status"
+        }
+      ]
     },
     "validators": {
+      "description": "validators assigned by Dorium can decide to approve or refund the escrow",
       "type": "array",
       "items": {
         "$ref": "#/definitions/Addr"
@@ -46,6 +85,42 @@
         },
         "denom": {
           "type": "string"
+        }
+      }
+    },
+    "Cw20CoinVerified": {
+      "type": "object",
+      "required": [
+        "address",
+        "amount"
+      ],
+      "properties": {
+        "address": {
+          "$ref": "#/definitions/Addr"
+        },
+        "amount": {
+          "$ref": "#/definitions/Uint128"
+        }
+      }
+    },
+    "GenericBalance": {
+      "type": "object",
+      "required": [
+        "cw20",
+        "native"
+      ],
+      "properties": {
+        "cw20": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Cw20CoinVerified"
+          }
+        },
+        "native": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Coin"
+          }
         }
       }
     },
@@ -78,10 +153,22 @@
         {
           "type": "object",
           "required": [
-            "Validated"
+            "Canceled"
           ],
           "properties": {
-            "Validated": {
+            "Canceled": {
+              "type": "object"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "Completed"
+          ],
+          "properties": {
+            "Completed": {
               "type": "object"
             }
           },
