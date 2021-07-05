@@ -2,6 +2,7 @@ import { config } from 'dotenv';
 import * as fs from 'fs';
 import { AccountData, DirectSecp256k1HdWallet } from '@cosmjs/proto-signing';
 import { ExecuteResult, InstantiateResult, SigningCosmWasmClient, UploadResult } from '@cosmjs/cosmwasm-stargate';
+import { Coin } from '@cosmjs/proto-signing/build/codec/cosmos/base/v1beta1/coin';
 
 config();
 
@@ -25,7 +26,7 @@ async function uploadContracts(account: AccountData, wallet: DirectSecp256k1HdWa
 	const con_cw20 = await client.upload(account.address, ERC20Contract);
 	console.log("CW20 Uploaded Contract", con_cw20);
 	const con_dorcp = await client.upload(account.address, ProposalContract);
-	console.log("DORCP Uploaded Contract TTT", con_dorcp);
+	console.log("DORCP Uploaded Contract", con_dorcp);
 	const contracts = {
 		cw20: {codeId: con_cw20.codeId, transactionHash: con_cw20.transactionHash},
 		dorcp: {codeId: con_dorcp.codeId, transactionHash: con_dorcp.transactionHash},
@@ -76,7 +77,9 @@ async function instantiateDoriumCommunityProposal(contractData: UploadResult, ac
 		source: account.address,
 		validators: [account.address],
 	}}
-	const createData = await client.execute(account.address, contractAddress, createMsg)
+
+	const funds = Coin.fromJSON({denom: "atom", amount: "100000"})
+	const createData = await client.execute(account.address, contractAddress, createMsg, "just deploying a DORCP here", [funds])
 	return [instantiateData, createData]
 }
 
