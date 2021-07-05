@@ -1,8 +1,7 @@
 import { config } from 'dotenv';
 import * as fs from 'fs';
 import { AccountData, DirectSecp256k1HdWallet } from '@cosmjs/proto-signing';
-import { SigningCosmWasmClient, UploadResult } from '@cosmjs/cosmwasm-stargate';
-import { CW20 } from './cw20-base-helpers';
+import { ExecuteResult, InstantiateResult, SigningCosmWasmClient, UploadResult } from '@cosmjs/cosmwasm-stargate';
 
 config();
 
@@ -26,13 +25,23 @@ async function uploadContracts(account: AccountData, wallet: DirectSecp256k1HdWa
 	const con_cw20 = await client.upload(account.address, ERC20Contract);
 	console.log("CW20 Uploaded Contract", con_cw20);
 	const con_dorcp = await client.upload(account.address, ProposalContract);
-	console.log("DORCP Uploaded Contract", con_dorcp);
-	var contracts = {
+	console.log("DORCP Uploaded Contract TTT", con_dorcp);
+	const contracts = {
 		cw20: {codeId: con_cw20.codeId, transactionHash: con_cw20.transactionHash},
 		dorcp: {codeId: con_dorcp.codeId, transactionHash: con_dorcp.transactionHash},
 	}
 	return contracts
 }
+
+export async function uploadContracts2() {
+	const account = await getWalletAccount();
+	const wallet = await getWalletData();
+	const client = await SigningCosmWasmClient.connectWithSigner(RPC_ENDPOINT, wallet, options);
+
+	const contracts = await uploadContracts(account, wallet, client);
+	fs.writeFileSync("contracts.json", JSON.stringify(contracts))
+}
+
 async function instantiateCW20(contractData: UploadResult, account: AccountData, wallet: DirectSecp256k1HdWallet, client: SigningCosmWasmClient) {
 	const initMsg = {
 		name: 'Dorium Value Token',
@@ -50,24 +59,33 @@ async function instantiateCW20(contractData: UploadResult, account: AccountData,
 	return instanceData
 }
 
-async function instantiateDoriumCommunityProposal(contractData: UploadResult, account: AccountData, wallet: DirectSecp256k1HdWallet, client: SigningCosmWasmClient) {
+async function instantiateDoriumCommunityProposal(contractData: UploadResult, account: AccountData, wallet: DirectSecp256k1HdWallet, client: SigningCosmWasmClient): Promise<[InstantiateResult, ExecuteResult]> {
 	const instantiateData = await client.instantiate(
 		account.address,
 		contractData.codeId,
 		{},
 		'creating the cw20 token'
 	);
-	return instantiateData
+	const contractAddress = instantiateData.contractAddress;
+
+	const createMsg = {
+		create:{
+		description: "Test Description",
+		id: "dorcp-test1",
+		proposer: account.address,
+		source: account.address,
+		validators: [account.address],
+	}}
+	const createData = await client.execute(account.address, contractAddress, createMsg)
+	return [instantiateData, createData]
 }
+
 
 export async function main() {
 	try {
 		const account = await getWalletAccount();
 		const wallet = await getWalletData();
 		const client = await SigningCosmWasmClient.connectWithSigner(RPC_ENDPOINT, wallet, options);
-
-		// const contracts = uploadContracts(account, wallet, client);
-		// fs.writeFileSync("contracts.json", JSON.stringify(contracts))
 
 		var con = JSON.parse(fs.readFileSync("contracts.json").toString());
 		const inst_cw20 = await instantiateCW20(con.cw20, account, wallet, client);
