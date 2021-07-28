@@ -1,7 +1,11 @@
-import { main, uploadContracts2} from "./src/deploy";
+import { deploy, uploadContracts2, scratchpad} from "./src/deploy";
 
-if(process.argv[2] == "upload") {
-    uploadContracts2()
-} else if(process.argv[2] == "deploy") {
-    main().then(r => r);
+void async function main() {
+    if(process.argv[2] == "deploy") {
+        await uploadContracts2()
+        await deploy()
+    } else if(process.argv[2] == "custom") {
+        await scratchpad()
+    }
+
 }
