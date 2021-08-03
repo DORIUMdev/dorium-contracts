@@ -38,8 +38,10 @@ async function uploadContracts(account: AccountData, wallet: DirectSecp256k1HdWa
 	const con_dorcp = await client.upload(account.address, ProposalContract);
 	console.log("DORCP Uploaded Contract", con_dorcp);
 	const contracts = {
-		cw20: {codeId: con_cw20.codeId, transactionHash: con_cw20.transactionHash},
-		dorcp: {codeId: con_dorcp.codeId, transactionHash: con_dorcp.transactionHash},
+		"contracts": {
+			cw20: {codeId: con_cw20.codeId, transactionHash: con_cw20.transactionHash},
+			dorcp: {codeId: con_dorcp.codeId, transactionHash: con_dorcp.transactionHash},
+		},
 	}
 	return contracts
 }
@@ -53,13 +55,30 @@ export async function uploadContracts2() {
 	writeContractsJson(contracts)
 }
 
-async function instantiateCW20(contractData: UploadResult, account: AccountData, wallet: DirectSecp256k1HdWallet, client: SigningCosmWasmClient) {
+async function instantiateValueToken(contractData: UploadResult, account: AccountData, wallet: DirectSecp256k1HdWallet, client: SigningCosmWasmClient) {
 	const initMsg = {
 		name: 'Dorium Value Token',
 		symbol: 'TREE',
 		decimals: 2,
 		initial_balances: [
 			{ address: 'wasm1ryuawewrukex42yh2kpydtpdh90ex096kaajek', amount: '3040000000000' }, // number of trees in the world according to Google
+		],
+		mint: {
+			minter: 'wasm1ryuawewrukex42yh2kpydtpdh90ex096kaajek',
+		},
+	};
+
+	const instanceData = await client.instantiate(account.address, contractData.codeId, initMsg, "instantiating the DORCP contract");
+	return instanceData
+}
+
+async function instantiateSobzToken(contractData: UploadResult, account: AccountData, wallet: DirectSecp256k1HdWallet, client: SigningCosmWasmClient) {
+	const initMsg = {
+		name: 'Dorium Social Business Token',
+		symbol: 'SOBZ',
+		decimals: 2,
+		initial_balances: [
+			{ address: 'wasm1ryuawewrukex42yh2kpydtpdh90ex096kaajek', amount: '10000000000' }, // whatever, we can mint more later?
 		],
 		mint: {
 			minter: 'wasm1ryuawewrukex42yh2kpydtpdh90ex096kaajek',
@@ -101,15 +120,20 @@ export async function deploy() {
 		const wallet = await getWalletData();
 		const client = await SigningCosmWasmClient.connectWithSigner(RPC_ENDPOINT, wallet, options);
 
-		var con = readContractsJson()
+		var con: any = readContractsJson()
 
-		const inst_cw20 = await instantiateCW20(con.cw20, account, wallet, client);
-		console.log("CW20 Instantiated", inst_cw20);
-		const inst_dorcp = await instantiateDoriumCommunityProposal(inst_cw20.contractAddress, con.dorcp, account, wallet, client);
+		const inst_cw20_value = await instantiateValueToken(con.contracts.cw20, account, wallet, client);
+		console.log("CW20 (Value) Instantiated", inst_cw20_value);
+		const inst_cw20_sobz = await instantiateSobzToken(con.contracts.cw20, account, wallet, client);
+		console.log("CW20 (Sobz) Instantiated", inst_cw20_sobz);
+		const inst_dorcp = await instantiateDoriumCommunityProposal(inst_cw20_value.contractAddress, con.contracts.dorcp, account, wallet, client);
 		console.log("DORCP Instantiated", inst_dorcp);
-
-		con.cw20.contractAddress = inst_cw20.contractAddress
-		con.dorcp.contractAddress = inst_dorcp[0].contractAddress
+		const output = {
+			"valuetoken": inst_cw20_value.contractAddress,
+			"sobztoken": inst_cw20_sobz.contractAddress,
+			"dorcp": inst_dorcp[0].contractAddress,
+		}
+		con.deployed_contracts = output;
 		writeContractsJson(con)
 	} catch (e) {
 		throw e;
@@ -122,18 +146,18 @@ export async function scratchpad() {
 	const client = await SigningCosmWasmClient.connectWithSigner(RPC_ENDPOINT, wallet, options);
 
 	var c = readContractsJson()
-	const token = CW20(client).use(c.cw20.contractAddress)
+	const token = CW20(client).use(c.deployed_contracts.valuetoken)
 	const result = await token.balance(account.address)
 	console.log(account.address, "balance in CW20", result)
 
 	// Sending CW20 to DORCP contract instance
-	// var transfer = await client.execute(account.address, c.cw20.contractAddress, {transfer: {recipient: c.dorcp.contractAddress, amount: "1000"}});
-	// console.dir(transfer, {depth: null})
+	var transfer = await client.execute(account.address, c.deployed_contracts.valuetoken, {transfer: {recipient: c.deployed_contracts.dorcp, amount: "1000"}});
+	console.dir(transfer, {depth: null})
 
 	// Querying DORCP contract state
-	var dorcpState = await client.queryContractSmart(c.dorcp.contractAddress, {details: {id: 'dorcp-test1'}})
+	var dorcpState = await client.queryContractSmart(c.deployed_contracts.dorcp, {details: {id: 'dorcp-test1'}})
 	console.dir(dorcpState, {depth: null})
 
-	// const result2 = await token.balance(account.address)
-	// console.log(account.address, "balance in CW20", result2)
+	const result2 = await token.balance(account.address)
+	console.log(account.address, "balance in CW20", result2)
 }
