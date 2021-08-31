@@ -100,6 +100,7 @@ mod tests {
     use super::*;
 
     use cosmwasm_std::testing::MockStorage;
+    use cosmwasm_std::{coin, Uint128};
 
     #[test]
     fn no_escrow_ids() {
@@ -119,6 +120,49 @@ mod tests {
             cw20_whitelist: vec![Addr::unchecked("Cw20 Value Token")],
             status: Status::Opened {},
         }
+    }
+
+    #[test]
+    fn add_tokens_native() {
+        let mut tokens = GenericBalance::default();
+        tokens.add_tokens(Balance::from(vec![coin(123, "atom"), coin(789, "eth")]));
+        tokens.add_tokens(Balance::from(vec![coin(456, "atom"), coin(12, "btc")]));
+        assert_eq!(
+            tokens.native,
+            vec![coin(579, "atom"), coin(789, "eth"), coin(12, "btc")]
+        );
+    }
+
+    #[test]
+    fn add_tokens_cw20() {
+        let mut tokens = GenericBalance::default();
+        let bar_token = Addr::unchecked("bar_token");
+        let foo_token = Addr::unchecked("foo_token");
+        tokens.add_tokens(Balance::Cw20(Cw20CoinVerified {
+            address: foo_token.clone(),
+            amount: Uint128(12345),
+        }));
+        tokens.add_tokens(Balance::Cw20(Cw20CoinVerified {
+            address: bar_token.clone(),
+            amount: Uint128(777),
+        }));
+        tokens.add_tokens(Balance::Cw20(Cw20CoinVerified {
+            address: foo_token.clone(),
+            amount: Uint128(23400),
+        }));
+        assert_eq!(
+            tokens.cw20,
+            vec![
+                Cw20CoinVerified {
+                    address: foo_token,
+                    amount: Uint128(35745),
+                },
+                Cw20CoinVerified {
+                    address: bar_token,
+                    amount: Uint128(777),
+                }
+            ]
+        );
     }
 
     #[test]

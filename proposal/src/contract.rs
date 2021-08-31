@@ -202,7 +202,7 @@ pub fn execute_refund(
         ESCROWS.remove(deps.storage, &id);
 
         // send all tokens out
-        let messages = send_tokens(&escrow.source, &escrow.balance)?;
+        let messages = refund_or_burn_tokens(&escrow.source, &escrow.balance)?;
 
         let attributes = vec![
             attr("action", "refund"),
@@ -238,6 +238,35 @@ fn send_tokens(to: &Addr, balance: &GenericBalance) -> StdResult<Vec<CosmosMsg>>
                 recipient: to.into(),
                 amount: c.amount,
             };
+            let exec = WasmMsg::Execute {
+                contract_addr: c.address.to_string(),
+                msg: to_binary(&msg)?,
+                send: vec![],
+            };
+            Ok(exec.into())
+        })
+        .collect();
+    msgs.append(&mut cw20_msgs?);
+    Ok(msgs)
+}
+
+fn refund_or_burn_tokens(to: &Addr, balance: &GenericBalance) -> StdResult<Vec<CosmosMsg>> {
+    let native_balance = &balance.native;
+    let mut msgs: Vec<CosmosMsg> = if native_balance.is_empty() {
+        vec![]
+    } else {
+        vec![BankMsg::Send {
+            to_address: to.into(),
+            amount: native_balance.to_vec(),
+        }
+        .into()]
+    };
+
+    let cw20_balance = &balance.cw20;
+    let cw20_msgs: StdResult<Vec<_>> = cw20_balance
+        .iter()
+        .map(|c| {
+            let msg = Cw20ExecuteMsg::Burn { amount: c.amount };
             let exec = WasmMsg::Execute {
                 contract_addr: c.address.to_string(),
                 msg: to_binary(&msg)?,
@@ -308,7 +337,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn happy_path_native() {
+    fn approve_proposal_native_token() {
         let mut deps = mock_dependencies(&[]);
 
         // instantiate an empty contract
@@ -373,7 +402,7 @@ mod tests {
     }
 
     #[test]
-    fn happy_path_cw20() {
+    fn approve_proposal_cw20_token() {
         let mut deps = mock_dependencies(&[]);
 
         // instantiate an empty contract
@@ -450,48 +479,56 @@ mod tests {
     }
 
     #[test]
-    fn add_tokens_proper() {
-        let mut tokens = GenericBalance::default();
-        tokens.add_tokens(Balance::from(vec![coin(123, "atom"), coin(789, "eth")]));
-        tokens.add_tokens(Balance::from(vec![coin(456, "atom"), coin(12, "btc")]));
+    fn reject_proposal_cw20_token() {
+        let mut deps = mock_dependencies(&[]);
+
+        // instantiate an empty contract
+        let instantiate_msg = InstantiateMsg {};
+        let info = mock_info(&String::from("anyone"), &[]);
+        let res = instantiate(deps.as_mut(), mock_env(), info, instantiate_msg).unwrap();
+        assert_eq!(0, res.messages.len());
+
+        // create an escrow
+        let create = CreateMsg {
+            id: "foobar".to_string(),
+            description: String::from("foo to a bar"),
+            validators: vec![String::from("validator1"), String::from("validator2")],
+            proposer: String::from("recd"),
+            source: String::from("dorium"),
+            cw20_whitelist: Some(vec![String::from("other-token")]),
+        };
+        let receive = Cw20ReceiveMsg {
+            sender: String::from("dorium"),
+            amount: Uint128(100),
+            msg: to_binary(&ExecuteMsg::Create(create.clone())).unwrap(),
+        };
+        let token_contract = String::from("my-cw20-token");
+        let info = mock_info(&token_contract, &[]);
+        let msg = ExecuteMsg::Receive(receive.clone());
+        let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+        assert_eq!(0, res.messages.len());
+        assert_eq!(attr("action", "create"), res.attributes[0]);
+
+        // reject it
+        let id = create.id.clone();
+        let info = mock_info(&create.validators[0], &[]);
+        let res = execute(deps.as_mut(), mock_env(), info, ExecuteMsg::Refund { id }).unwrap();
+        assert_eq!(1, res.messages.len());
+        assert_eq!(attr("action", "refund"), res.attributes[0]);
+
+        // ensure that the escrow contract told the CW20 contract to burn the tokens
+        let burn_msg = Cw20ExecuteMsg::Burn {
+            amount: Uint128(100),
+        };
         assert_eq!(
-            tokens.native,
-            vec![coin(579, "atom"), coin(789, "eth"), coin(12, "btc")]
+            res.messages[0],
+            CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: token_contract,
+                msg: to_binary(&burn_msg).unwrap(),
+                send: vec![],
+            })
         );
     }
-
-    #[test]
-    fn add_cw_tokens_proper() {
-        let mut tokens = GenericBalance::default();
-        let bar_token = Addr::unchecked("bar_token");
-        let foo_token = Addr::unchecked("foo_token");
-        tokens.add_tokens(Balance::Cw20(Cw20CoinVerified {
-            address: foo_token.clone(),
-            amount: Uint128(12345),
-        }));
-        tokens.add_tokens(Balance::Cw20(Cw20CoinVerified {
-            address: bar_token.clone(),
-            amount: Uint128(777),
-        }));
-        tokens.add_tokens(Balance::Cw20(Cw20CoinVerified {
-            address: foo_token.clone(),
-            amount: Uint128(23400),
-        }));
-        assert_eq!(
-            tokens.cw20,
-            vec![
-                Cw20CoinVerified {
-                    address: foo_token,
-                    amount: Uint128(35745),
-                },
-                Cw20CoinVerified {
-                    address: bar_token,
-                    amount: Uint128(777),
-                }
-            ]
-        );
-    }
-
     #[test]
     fn top_up_mixed_tokens() {
         let mut deps = mock_dependencies(&[]);

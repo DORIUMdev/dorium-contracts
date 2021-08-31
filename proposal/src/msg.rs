@@ -21,8 +21,9 @@ pub enum ExecuteMsg {
         /// id is a human-readable name for the escrow from create
         id: String,
     },
-    /// Refund returns all remaining tokens to the original sender,
-    /// The arbiter can do this any time, or anyone can do this after a timeout
+    /// Refund returns all remaining native tokens to the original sender, or if
+    /// it is a CW20 token, calls burn. The arbiter can do this any time, or
+    /// anyone can do this after a timeout
     Refund {
         /// id is a human-readable name for the escrow from create
         id: String,
