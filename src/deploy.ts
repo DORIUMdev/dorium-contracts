@@ -2,6 +2,7 @@ import { config } from 'dotenv';
 import * as fs from 'fs';
 import * as util from 'util';
 import { AccountData, DirectSecp256k1HdWallet } from '@cosmjs/proto-signing';
+import { toBase64, toUtf8 } from '@cosmjs/encoding';
 import { ExecuteResult, InstantiateResult, SigningCosmWasmClient, UploadResult } from '@cosmjs/cosmwasm-stargate';
 import { Coin } from '@cosmjs/proto-signing/build/codec/cosmos/base/v1beta1/coin';
 import { CW20 } from "./cw20-base-helpers";
@@ -89,7 +90,7 @@ async function instantiateSobzToken(contractData: UploadResult, account: Account
 	return instanceData
 }
 
-async function instantiateDoriumCommunityProposal(cw20Address1: string, contractData: UploadResult, account: AccountData, wallet: DirectSecp256k1HdWallet, client: SigningCosmWasmClient): Promise<[InstantiateResult, ExecuteResult]> {
+async function instantiateDoriumCommunityProposal(id: string, description: string, cw20Address1: string, contractData: UploadResult, account: AccountData, wallet: DirectSecp256k1HdWallet, client: SigningCosmWasmClient): Promise<[InstantiateResult, ExecuteResult]> {
 	const instantiateData = await client.instantiate(
 		account.address,
 		contractData.codeId,
@@ -100,8 +101,8 @@ async function instantiateDoriumCommunityProposal(cw20Address1: string, contract
 
 	const createMsg = {
 		create:{
-		description: "Test Description",
-		id: "dorcp-test1",
+		description: description,
+		id: id,
 		proposer: account.address,
 		source: account.address,
 		validators: [account.address],
@@ -113,6 +114,17 @@ async function instantiateDoriumCommunityProposal(cw20Address1: string, contract
 	return [instantiateData, createData]
 }
 
+async function queryProposalState(id: string, dorcpContractAddress: string, client: SigningCosmWasmClient) {
+	const dorcpState = await client.queryContractSmart(dorcpContractAddress, {details: {id: id}})
+	return dorcpState
+}
+
+async function sendToProposal(id: string, cw20Address: string, dorcpContractAddress: string, amount: string, from: string, client: SigningCosmWasmClient) {
+	const topup = {top_up: {id: id}}
+	const topupBin = toBase64(toUtf8(JSON.stringify(topup)))
+	const transfer = await client.execute(from, cw20Address, {send: {contract: dorcpContractAddress, amount: amount, msg: topupBin}});
+	return transfer
+}
 
 export async function deploy() {
 	try {
@@ -126,7 +138,7 @@ export async function deploy() {
 		console.log("CW20 (Value) Instantiated", inst_cw20_value);
 		const inst_cw20_sobz = await instantiateSobzToken(con.contracts.cw20, account, wallet, client);
 		console.log("CW20 (Sobz) Instantiated", inst_cw20_sobz);
-		const inst_dorcp = await instantiateDoriumCommunityProposal(inst_cw20_value.contractAddress, con.contracts.dorcp, account, wallet, client);
+		const inst_dorcp = await instantiateDoriumCommunityProposal("test-dorcp", "this is just a test Proposal", inst_cw20_value.contractAddress, con.contracts.dorcp, account, wallet, client);
 		console.log("DORCP Instantiated", inst_dorcp);
 		const output = {
 			"valuetoken": inst_cw20_value.contractAddress,
@@ -148,16 +160,16 @@ export async function scratchpad() {
 	var c = readContractsJson()
 	const token = CW20(client).use(c.deployed_contracts.valuetoken)
 	const result = await token.balance(account.address)
-	console.log(account.address, "balance in CW20", result)
+	console.log("Master account", account.address, "balance in CW20", result)
 
 	// Sending CW20 to DORCP contract instance
-	var transfer = await client.execute(account.address, c.deployed_contracts.valuetoken, {transfer: {recipient: c.deployed_contracts.dorcp, amount: "1000"}});
+	const transfer = await sendToProposal('test-dorcp', c.deployed_contracts.valuetoken, c.deployed_contracts.dorcp, "1000", account.address, client)
 	console.dir(transfer, {depth: null})
 
 	// Querying DORCP contract state
-	var dorcpState = await client.queryContractSmart(c.deployed_contracts.dorcp, {details: {id: 'dorcp-test1'}})
+	var dorcpState = await queryProposalState('test-dorcp', c.deployed_contracts.dorcp, client)
 	console.dir(dorcpState, {depth: null})
 
 	const result2 = await token.balance(account.address)
-	console.log(account.address, "balance in CW20", result2)
+	console.log("Master account", account.address, "balance in CW20", result2)
 }
