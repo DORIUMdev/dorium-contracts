@@ -1,0 +1,11 @@
+[Unit]
+Description=wasmd systemd service file
+
+[Service]
+User=root
+WorkingDirectory=/root/dorium-contracts
+Environment="PATH=/root/go/bin"
+ExecStart=/bin/bash -c /root/dorium-contracts/wasmdstart.sh
+
+[Install]
+WantedBy=multi-user.target
