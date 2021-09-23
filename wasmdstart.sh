@@ -1,7 +1,7 @@
 # default home is ~/.wasmd
 # if you want to setup multiple apps on your local make sure to change this value
 APP_HOME="./wasmddata"
-RPC="http://0.0.0.0:26657"
+RPC="tcp://0.0.0.0:26657"
 CHAIN_ID="localnet"
 
 rm -rf $APP_HOME
@@ -28,4 +28,4 @@ wasmd collect-gentxs --home ${APP_HOME}
 wasmd validate-genesis --home ${APP_HOME}
 
 # run the node
-wasmd start --home ${APP_HOME}
+wasmd start --home ${APP_HOME} --rpc.laddr ${RPC}
