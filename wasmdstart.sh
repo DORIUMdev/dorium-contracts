@@ -1,7 +1,7 @@
 # default home is ~/.wasmd
 # if you want to setup multiple apps on your local make sure to change this value
 APP_HOME="./wasmddata"
-RPC="http://localhost:26657"
+RPC="http://0.0.0.0:26657"
 CHAIN_ID="localnet"
 
 rm -rf $APP_HOME
