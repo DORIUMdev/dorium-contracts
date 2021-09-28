@@ -6,6 +6,7 @@ import { toBase64, toUtf8 } from '@cosmjs/encoding';
 import { ExecuteResult, InstantiateResult, SigningCosmWasmClient, UploadResult } from '@cosmjs/cosmwasm-stargate';
 import { Coin } from '@cosmjs/proto-signing/build/codec/cosmos/base/v1beta1/coin';
 import { CW20 } from "./cw20-base-helpers";
+import { DORCP } from './dorcp-helper';
 config();
 
 const { ERC20_CONTRACT, DORIUM_PROPOSAL_CONTRACT, MNEMONIC_MAIN, RPC_ENDPOINT } = process.env;
@@ -152,7 +153,7 @@ export async function deploy() {
 	}
 }
 
-export async function scratchpad() {
+export async function sendCW20ToProposal() {
 	const account = await getWalletAccount();
 	const wallet = await getWalletData();
 	const client = await SigningCosmWasmClient.connectWithSigner(RPC_ENDPOINT, wallet, options);
@@ -172,4 +173,27 @@ export async function scratchpad() {
 
 	const result2 = await token.balance(account.address)
 	console.log("Master account", account.address, "balance in CW20", result2)
+}
+const generateRandomString = (length=6)=>Math.random().toString(20).substr(2, length)
+
+export async function dorcpLifecycle() {
+	const account = await getWalletAccount();
+	const wallet = await getWalletData();
+	const client = await SigningCosmWasmClient.connectWithSigner(RPC_ENDPOINT, wallet, options);
+
+	var c = readContractsJson()
+	const dorcp = DORCP(client).use(c.deployed_contracts.dorcp)
+	const proposalId = generateRandomString()
+	var result = await dorcp.create(account.address, proposalId, "description goes here", account.address, [account.address], [c.deployed_contracts.valuetoken], Coin.fromJSON({denom: "ucosm", amount: "1"}))
+	console.dir(result)
+
+	var result = await dorcp.topup(account.address, c.deployed_contracts.valuetoken, proposalId, "1000")
+	console.dir(result)
+
+	console.dir(await dorcp.status(proposalId))
+
+	// result = await dorcp.approve(account.address, proposalId)
+	// console.dir(result)
+	result = await dorcp.refund(account.address, proposalId)
+	console.dir(result)
 }
