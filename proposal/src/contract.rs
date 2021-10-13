@@ -101,6 +101,7 @@ pub fn execute_create(
 
     let escrow = Escrow {
         id: msg.id.clone(),
+        url: msg.url.clone(),
         description: msg.description,
         validators: validators,
         proposer: deps.api.addr_validate(&msg.proposer)?,
@@ -309,6 +310,7 @@ fn query_details(deps: Deps, id: String) -> StdResult<DetailsResponse> {
 
     let details = DetailsResponse {
         id,
+        url: escrow.url,
         description: escrow.description,
         validators: validators_str,
         proposer: escrow.proposer.to_string(),
@@ -349,6 +351,7 @@ mod tests {
         // create an escrow
         let create = CreateMsg {
             id: "foobar".to_string(),
+            url: "https://darmstadt.dorium.apeunit.com".to_string(),
             description: String::from("foo of a bar of a escrow"),
             validators: vec![String::from("validator1"), String::from("validator2")],
             proposer: String::from("recd"),
@@ -369,6 +372,7 @@ mod tests {
             details,
             DetailsResponse {
                 id: "foobar".to_string(),
+                url: "https://darmstadt.dorium.apeunit.com".to_string(),
                 description: String::from("foo of a bar of a escrow"),
                 validators: vec![String::from("validator1"), String::from("validator2")],
                 proposer: String::from("recd"),
@@ -414,6 +418,7 @@ mod tests {
         // create an escrow
         let create = CreateMsg {
             id: "foobar".to_string(),
+            url: "https://darmstadt.dorium.apeunit.com".to_string(),
             description: String::from("foo to a bar"),
             validators: vec![String::from("validator1"), String::from("validator2")],
             proposer: String::from("recd"),
@@ -438,6 +443,7 @@ mod tests {
             details,
             DetailsResponse {
                 id: "foobar".to_string(),
+                url: "https://darmstadt.dorium.apeunit.com".to_string(),
                 description: String::from("foo to a bar"),
                 validators: vec![String::from("validator1"), String::from("validator2")],
                 proposer: String::from("recd"),
@@ -491,6 +497,7 @@ mod tests {
         // create an escrow
         let create = CreateMsg {
             id: "foobar".to_string(),
+            url: "https://darmstadt.dorium.apeunit.com".to_string(),
             description: String::from("foo to a bar"),
             validators: vec![String::from("validator1"), String::from("validator2")],
             proposer: String::from("recd"),
@@ -545,6 +552,7 @@ mod tests {
         // create an escrow with 2 native tokens
         let create = CreateMsg {
             id: "foobar".to_string(),
+            url: "https://darmstadt.dorium.apeunit.com".to_string(),
             description: String::from("foo to a bar"),
             validators: vec![String::from("validator1"), String::from("validator2")],
             proposer: String::from("recd"),

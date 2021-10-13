@@ -47,6 +47,8 @@ pub struct CreateMsg {
     /// id is a human-readable name for the escrow to use later
     /// 3-20 bytes of utf-8 text
     pub id: String,
+    /// URL (there must be a forum post somewhere)
+    pub url: String,
     /// more information about this proposal (URL to forum topic?)
     pub description: String,
     /// validators assigned by Dorium can decide to approve or refund the escrow
@@ -99,7 +101,9 @@ pub struct DetailsResponse {
     /// id is a human-readable name. It is the key in the mapping to store the
     /// Escrow state, so it cannot be changed. 3-20 bytes of utf-8 text
     pub id: String,
-    /// more information about this proposal (URL to forum topic?)
+    /// URL (there must be a forum post somewhere)
+    pub url: String,
+    /// more information about this proposal
     pub description: String,
     /// validators assigned by Dorium can decide to approve or refund the escrow
     pub validators: Vec<String>,
