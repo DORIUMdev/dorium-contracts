@@ -20,4 +20,7 @@ pub enum ContractError {
 
     #[error("Escrow id already in use")]
     AlreadyInUse {},
+
+    #[error("Escrow has already been approved/rejected and cannot be changed further")]
+    Locked {},
 }

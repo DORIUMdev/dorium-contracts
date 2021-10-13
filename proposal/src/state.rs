@@ -85,6 +85,15 @@ impl Escrow {
     pub fn human_validators(&self) -> Vec<String> {
         self.validators.iter().map(|a| a.to_string()).collect()
     }
+
+    /// whether this proposal can be changed any further (once approved/rejected, it will be locked)
+    pub fn locked(&self) -> bool {
+        match self.status {
+            Status::Canceled {} => true,
+            Status::Completed {} => true,
+            _ => false,
+        }
+    }
 }
 
 pub const ESCROWS: Map<&str, Escrow> = Map::new("escrow");

@@ -135,6 +135,11 @@ pub fn execute_top_up(
     // this fails is no escrow there
     let mut escrow = ESCROWS.load(deps.storage, &id)?;
 
+    // If status is Completed or Canceled, don't let people send tokens to this escrow anymore!
+    if escrow.locked() {
+        return Err(ContractError::Locked {});
+    }
+
     if let Balance::Cw20(token) = &balance {
         // ensure the token is on the whitelist
         if !escrow.cw20_whitelist.iter().any(|t| t == &token.address) {
@@ -161,16 +166,21 @@ pub fn execute_approve(
     id: String,
 ) -> Result<Response, ContractError> {
     // this fails is no escrow there
-    let escrow = ESCROWS.load(deps.storage, &id)?;
+    let mut escrow = ESCROWS.load(deps.storage, &id)?;
 
     if !escrow.validators.contains(&info.sender) {
-        Err(ContractError::Unauthorized {})
-    } else {
-        // we delete the escrow
-        ESCROWS.remove(deps.storage, &id);
+        return Err(ContractError::Unauthorized {});
+    } else if escrow.locked() {
+        return Err(ContractError::Locked {});
+    }
+    {
+        escrow.status = Status::Completed {};
 
         // send all tokens out
         let messages = send_tokens(&escrow.proposer, &escrow.balance)?;
+
+        // save the updated status field
+        ESCROWS.save(deps.storage, &id, &escrow)?;
 
         let attributes = vec![
             attr("action", "approve"),
@@ -193,17 +203,21 @@ pub fn execute_refund(
     id: String,
 ) -> Result<Response, ContractError> {
     // this fails is no escrow there
-    let escrow = ESCROWS.load(deps.storage, &id)?;
+    let mut escrow = ESCROWS.load(deps.storage, &id)?;
 
     // only a validator can decide to refund the escrowed funds (to DORIUM)
     if !escrow.validators.contains(&info.sender) {
-        Err(ContractError::Unauthorized {})
+        return Err(ContractError::Unauthorized {});
+    } else if escrow.locked() {
+        return Err(ContractError::Locked {});
     } else {
-        // we delete the escrow
-        ESCROWS.remove(deps.storage, &id);
+        escrow.status = Status::Canceled {};
 
         // send all tokens out
         let messages = refund_or_burn_tokens(&escrow.source, &escrow.balance)?;
+
+        // save the updated status field
+        ESCROWS.save(deps.storage, &id, &escrow)?;
 
         let attributes = vec![
             attr("action", "refund"),
