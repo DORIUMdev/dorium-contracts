@@ -59,6 +59,8 @@ pub struct Escrow {
     /// id is a human-readable name. It is the key in the mapping to store the
     /// Escrow state, so it cannot be changed. 3-20 bytes of utf-8 text
     pub id: String,
+    /// URL (there must be a forum post somewhere)
+    pub url: String,
     /// more information about this proposal (URL to forum topic?)
     pub description: String,
     /// validators assigned by Dorium can decide to approve or refund the escrow
@@ -82,6 +84,15 @@ impl Escrow {
 
     pub fn human_validators(&self) -> Vec<String> {
         self.validators.iter().map(|a| a.to_string()).collect()
+    }
+
+    /// whether this proposal can be changed any further (once approved/rejected, it will be locked)
+    pub fn locked(&self) -> bool {
+        match self.status {
+            Status::Canceled {} => true,
+            Status::Completed {} => true,
+            _ => false,
+        }
     }
 }
 
@@ -112,6 +123,7 @@ mod tests {
     fn dummy_escrow() -> Escrow {
         Escrow {
             id: "test escrow".to_string(),
+            url: "https://darmstadt.dorium.apeunit.com".to_string(),
             description: "more information about the test here".to_string(),
             validators: vec![Addr::unchecked("arb")],
             proposer: Addr::unchecked("proposer"),

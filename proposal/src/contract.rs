@@ -101,6 +101,7 @@ pub fn execute_create(
 
     let escrow = Escrow {
         id: msg.id.clone(),
+        url: msg.url.clone(),
         description: msg.description,
         validators: validators,
         proposer: deps.api.addr_validate(&msg.proposer)?,
@@ -134,6 +135,11 @@ pub fn execute_top_up(
     // this fails is no escrow there
     let mut escrow = ESCROWS.load(deps.storage, &id)?;
 
+    // If status is Completed or Canceled, don't let people send tokens to this escrow anymore!
+    if escrow.locked() {
+        return Err(ContractError::Locked {});
+    }
+
     if let Balance::Cw20(token) = &balance {
         // ensure the token is on the whitelist
         if !escrow.cw20_whitelist.iter().any(|t| t == &token.address) {
@@ -160,16 +166,21 @@ pub fn execute_approve(
     id: String,
 ) -> Result<Response, ContractError> {
     // this fails is no escrow there
-    let escrow = ESCROWS.load(deps.storage, &id)?;
+    let mut escrow = ESCROWS.load(deps.storage, &id)?;
 
     if !escrow.validators.contains(&info.sender) {
-        Err(ContractError::Unauthorized {})
-    } else {
-        // we delete the escrow
-        ESCROWS.remove(deps.storage, &id);
+        return Err(ContractError::Unauthorized {});
+    } else if escrow.locked() {
+        return Err(ContractError::Locked {});
+    }
+    {
+        escrow.status = Status::Completed {};
 
         // send all tokens out
         let messages = send_tokens(&escrow.proposer, &escrow.balance)?;
+
+        // save the updated status field
+        ESCROWS.save(deps.storage, &id, &escrow)?;
 
         let attributes = vec![
             attr("action", "approve"),
@@ -192,17 +203,21 @@ pub fn execute_refund(
     id: String,
 ) -> Result<Response, ContractError> {
     // this fails is no escrow there
-    let escrow = ESCROWS.load(deps.storage, &id)?;
+    let mut escrow = ESCROWS.load(deps.storage, &id)?;
 
     // only a validator can decide to refund the escrowed funds (to DORIUM)
     if !escrow.validators.contains(&info.sender) {
-        Err(ContractError::Unauthorized {})
+        return Err(ContractError::Unauthorized {});
+    } else if escrow.locked() {
+        return Err(ContractError::Locked {});
     } else {
-        // we delete the escrow
-        ESCROWS.remove(deps.storage, &id);
+        escrow.status = Status::Canceled {};
 
         // send all tokens out
         let messages = refund_or_burn_tokens(&escrow.source, &escrow.balance)?;
+
+        // save the updated status field
+        ESCROWS.save(deps.storage, &id, &escrow)?;
 
         let attributes = vec![
             attr("action", "refund"),
@@ -309,6 +324,7 @@ fn query_details(deps: Deps, id: String) -> StdResult<DetailsResponse> {
 
     let details = DetailsResponse {
         id,
+        url: escrow.url,
         description: escrow.description,
         validators: validators_str,
         proposer: escrow.proposer.to_string(),
@@ -349,6 +365,7 @@ mod tests {
         // create an escrow
         let create = CreateMsg {
             id: "foobar".to_string(),
+            url: "https://darmstadt.dorium.apeunit.com".to_string(),
             description: String::from("foo of a bar of a escrow"),
             validators: vec![String::from("validator1"), String::from("validator2")],
             proposer: String::from("recd"),
@@ -369,6 +386,7 @@ mod tests {
             details,
             DetailsResponse {
                 id: "foobar".to_string(),
+                url: "https://darmstadt.dorium.apeunit.com".to_string(),
                 description: String::from("foo of a bar of a escrow"),
                 validators: vec![String::from("validator1"), String::from("validator2")],
                 proposer: String::from("recd"),
@@ -414,6 +432,7 @@ mod tests {
         // create an escrow
         let create = CreateMsg {
             id: "foobar".to_string(),
+            url: "https://darmstadt.dorium.apeunit.com".to_string(),
             description: String::from("foo to a bar"),
             validators: vec![String::from("validator1"), String::from("validator2")],
             proposer: String::from("recd"),
@@ -438,6 +457,7 @@ mod tests {
             details,
             DetailsResponse {
                 id: "foobar".to_string(),
+                url: "https://darmstadt.dorium.apeunit.com".to_string(),
                 description: String::from("foo to a bar"),
                 validators: vec![String::from("validator1"), String::from("validator2")],
                 proposer: String::from("recd"),
@@ -491,6 +511,7 @@ mod tests {
         // create an escrow
         let create = CreateMsg {
             id: "foobar".to_string(),
+            url: "https://darmstadt.dorium.apeunit.com".to_string(),
             description: String::from("foo to a bar"),
             validators: vec![String::from("validator1"), String::from("validator2")],
             proposer: String::from("recd"),
@@ -545,6 +566,7 @@ mod tests {
         // create an escrow with 2 native tokens
         let create = CreateMsg {
             id: "foobar".to_string(),
+            url: "https://darmstadt.dorium.apeunit.com".to_string(),
             description: String::from("foo to a bar"),
             validators: vec![String::from("validator1"), String::from("validator2")],
             proposer: String::from("recd"),
