@@ -16,6 +16,19 @@
       "additionalProperties": false
     },
     {
+      "description": "Show all open escrows and their details. Useful to avoid needing an indexing layer for now",
+      "type": "object",
+      "required": [
+        "list_detailed"
+      ],
+      "properties": {
+        "list_detailed": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
       "description": "Returns the details of the named escrow, error if not created Return type: DetailsResponse.",
       "type": "object",
       "required": [

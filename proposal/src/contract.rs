@@ -1,4 +1,4 @@
-use crate::state::{all_escrow_ids, Escrow, GenericBalance, ESCROWS};
+use crate::state::{all_escrow_details, all_escrow_ids, Escrow, GenericBalance, ESCROWS};
 use cosmwasm_std::{
     attr, entry_point, from_binary, to_binary, Addr, BankMsg, Binary, CosmosMsg, Deps, DepsMut,
     Env, MessageInfo, Response, StdError, StdResult, WasmMsg,
@@ -8,7 +8,8 @@ use cw20::{Balance, Cw20Coin, Cw20CoinVerified, Cw20ExecuteMsg, Cw20ReceiveMsg};
 
 use crate::error::ContractError;
 use crate::msg::{
-    CreateMsg, DetailsResponse, ExecuteMsg, InstantiateMsg, ListResponse, QueryMsg, ReceiveMsg,
+    CreateMsg, DetailsResponse, ExecuteMsg, InstantiateMsg, ListDetailedResponse, ListResponse,
+    QueryMsg, ReceiveMsg,
 };
 use crate::state::Status;
 
@@ -294,53 +295,69 @@ fn refund_or_burn_tokens(to: &Addr, balance: &GenericBalance) -> StdResult<Vec<C
     Ok(msgs)
 }
 
+impl DetailsResponse {
+    fn from_escrow(escrow: &Escrow) -> StdResult<DetailsResponse> {
+        let cw20_whitelist = escrow.human_whitelist();
+        let validators_str = escrow.human_validators();
+        // transform tokens
+        let native_balance = escrow.balance.native.clone();
+
+        let cw20_balance: StdResult<Vec<_>> = escrow
+            .balance
+            .cw20
+            .clone()
+            .into_iter()
+            .map(|token| {
+                Ok(Cw20Coin {
+                    address: token.address.into(),
+                    amount: token.amount,
+                })
+            })
+            .collect();
+
+        Ok(DetailsResponse {
+            id: escrow.id.clone(),
+            url: escrow.url.clone(),
+            description: escrow.description.clone(),
+            validators: validators_str,
+            proposer: escrow.proposer.to_string(),
+            source: escrow.source.to_string(),
+            native_balance: native_balance.to_vec(),
+            cw20_balance: cw20_balance?,
+            cw20_whitelist: cw20_whitelist,
+            status: escrow.status.clone(),
+        })
+    }
+}
+
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::List {} => to_binary(&query_list(deps)?),
+        QueryMsg::ListDetailed {} => to_binary(&query_list_detailed(deps)?),
         QueryMsg::Details { id } => to_binary(&query_details(deps, id)?),
     }
 }
 
 fn query_details(deps: Deps, id: String) -> StdResult<DetailsResponse> {
     let escrow = ESCROWS.load(deps.storage, &id)?;
-
-    let cw20_whitelist = escrow.human_whitelist();
-    let validators_str = escrow.human_validators();
-    // transform tokens
-    let native_balance = escrow.balance.native;
-
-    let cw20_balance: StdResult<Vec<_>> = escrow
-        .balance
-        .cw20
-        .into_iter()
-        .map(|token| {
-            Ok(Cw20Coin {
-                address: token.address.into(),
-                amount: token.amount,
-            })
-        })
-        .collect();
-
-    let details = DetailsResponse {
-        id,
-        url: escrow.url,
-        description: escrow.description,
-        validators: validators_str,
-        proposer: escrow.proposer.to_string(),
-        source: escrow.source.to_string(),
-        native_balance: native_balance,
-        cw20_balance: cw20_balance?,
-        cw20_whitelist: cw20_whitelist,
-        status: escrow.status,
-    };
-    Ok(details)
+    Ok(DetailsResponse::from_escrow(&escrow)?)
 }
 
 fn query_list(deps: Deps) -> StdResult<ListResponse> {
     Ok(ListResponse {
         escrows: all_escrow_ids(deps.storage)?,
     })
+}
+
+fn query_list_detailed(deps: Deps) -> StdResult<ListDetailedResponse> {
+    let ids = all_escrow_ids(deps.storage)?;
+    let escrows = all_escrow_details(deps.storage, ids)?;
+    let drs: StdResult<Vec<DetailsResponse>> = escrows
+        .iter()
+        .map(|e: &Escrow| DetailsResponse::from_escrow(e))
+        .collect();
+    Ok(ListDetailedResponse { escrows: drs? })
 }
 
 #[cfg(test)]

@@ -7,6 +7,7 @@
     "id",
     "proposer",
     "source",
+    "url",
     "validators"
   ],
   "properties": {
@@ -34,6 +35,10 @@
     },
     "source": {
       "description": "if refunded, funds go to the source (Dorium)",
+      "type": "string"
+    },
+    "url": {
+      "description": "URL (there must be a forum post somewhere)",
       "type": "string"
     },
     "validators": {

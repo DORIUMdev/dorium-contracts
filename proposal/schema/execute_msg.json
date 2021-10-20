@@ -58,7 +58,7 @@
       "additionalProperties": false
     },
     {
-      "description": "Refund returns all remaining tokens to the original sender, The arbiter can do this any time, or anyone can do this after a timeout",
+      "description": "Refund returns all remaining native tokens to the original sender, or if it is a CW20 token, calls burn. The arbiter can do this any time, or anyone can do this after a timeout",
       "type": "object",
       "required": [
         "refund"
@@ -105,6 +105,7 @@
         "id",
         "proposer",
         "source",
+        "url",
         "validators"
       ],
       "properties": {
@@ -132,6 +133,10 @@
         },
         "source": {
           "description": "if refunded, funds go to the source (Dorium)",
+          "type": "string"
+        },
+        "url": {
+          "description": "URL (there must be a forum post somewhere)",
           "type": "string"
         },
         "validators": {

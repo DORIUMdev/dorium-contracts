@@ -106,6 +106,15 @@ pub fn all_escrow_ids(storage: &dyn Storage) -> StdResult<Vec<String>> {
         .collect()
 }
 
+/// This returns all registered escrows
+pub fn all_escrow_details(storage: &dyn Storage, keys: Vec<String>) -> StdResult<Vec<Escrow>> {
+    let mut ans: Vec<Escrow> = Vec::new();
+    for key in keys {
+        ans.push(ESCROWS.load(storage, &key)?);
+    }
+    return Ok(ans);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

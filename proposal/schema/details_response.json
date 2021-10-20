@@ -11,6 +11,7 @@
     "proposer",
     "source",
     "status",
+    "url",
     "validators"
   ],
   "properties": {
@@ -29,7 +30,7 @@
       }
     },
     "description": {
-      "description": "more information about this proposal (URL to forum topic?)",
+      "description": "more information about this proposal",
       "type": "string"
     },
     "id": {
@@ -58,6 +59,10 @@
           "$ref": "#/definitions/Status"
         }
       ]
+    },
+    "url": {
+      "description": "URL (there must be a forum post somewhere)",
+      "type": "string"
     },
     "validators": {
       "description": "validators assigned by Dorium can decide to approve or refund the escrow",
