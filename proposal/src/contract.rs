@@ -363,12 +363,41 @@ fn query_list_detailed(deps: Deps) -> StdResult<ListDetailedResponse> {
 #[cfg(test)]
 mod tests {
     use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
-    use cosmwasm_std::{coin, coins, CosmosMsg, StdError, Uint128};
+    use cosmwasm_std::{coin, coins, Coin, CosmosMsg, StdError, Uint128};
 
     use crate::msg::ExecuteMsg::TopUp;
 
     use super::*;
+    fn mock_topup_cw20_message(id: &String) -> StdResult<ExecuteMsg> {
+        let base = TopUp { id: id.to_string() };
+        let top_up = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: String::from("random"),
+            amount: Uint128(7890),
+            msg: to_binary(&base).unwrap(),
+        });
+        return Ok(top_up);
+    }
 
+    fn quick_create_msg_cw20() -> (CreateMsg, ExecuteMsg, MessageInfo) {
+        let create = CreateMsg {
+            id: "foobar".to_string(),
+            url: "https://darmstadt.dorium.apeunit.com".to_string(),
+            description: String::from("foo to a bar"),
+            validators: vec![String::from("validator1"), String::from("validator2")],
+            proposer: String::from("recd"),
+            source: String::from("dorium"),
+            cw20_whitelist: Some(vec![String::from("other-token")]),
+        };
+        let receive = Cw20ReceiveMsg {
+            sender: String::from("dorium"),
+            amount: Uint128(100),
+            msg: to_binary(&ExecuteMsg::Create(create.clone())).unwrap(),
+        };
+        let token_contract = String::from("my-cw20-token");
+        let info = mock_info(&token_contract, &[]);
+        let msg = ExecuteMsg::Receive(receive.clone());
+        return (create, msg, info);
+    }
     #[test]
     fn approve_proposal_native_token() {
         let mut deps = mock_dependencies(&[]);
@@ -428,12 +457,6 @@ mod tests {
                 amount: balance,
             })
         );
-
-        // second attempt fails (not found)
-        let id = create.id.clone();
-        let info = mock_info(&create.validators[0], &[]);
-        let err = execute(deps.as_mut(), mock_env(), info, ExecuteMsg::Approve { id }).unwrap_err();
-        assert!(matches!(err, ContractError::Std(StdError::NotFound { .. })));
     }
 
     #[test]
@@ -490,9 +513,16 @@ mod tests {
         );
 
         // approve it
-        let id = create.id.clone();
         let info = mock_info(&create.validators[0], &[]);
-        let res = execute(deps.as_mut(), mock_env(), info, ExecuteMsg::Approve { id }).unwrap();
+        let res = execute(
+            deps.as_mut(),
+            mock_env(),
+            info,
+            ExecuteMsg::Approve {
+                id: create.id.clone(),
+            },
+        )
+        .unwrap();
         assert_eq!(1, res.messages.len());
         assert_eq!(attr("action", "approve"), res.attributes[0]);
         let send_msg = Cw20ExecuteMsg::Transfer {
@@ -507,12 +537,6 @@ mod tests {
                 send: vec![],
             })
         );
-
-        // second attempt fails (not found)
-        let id = create.id.clone();
-        let info = mock_info(&create.validators[0], &[]);
-        let err = execute(deps.as_mut(), mock_env(), info, ExecuteMsg::Approve { id }).unwrap_err();
-        assert!(matches!(err, ContractError::Std(StdError::NotFound { .. })));
     }
 
     #[test]
@@ -696,5 +720,91 @@ mod tests {
                 send: vec![],
             })
         );
+    }
+
+    #[test]
+    fn approved_proposal_is_locked() {
+        // quickly create a proposal, funding it with cw20 tokens
+        let mut deps = mock_dependencies(&[]);
+        let (create, msg, info) = quick_create_msg_cw20();
+        execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+
+        // approve it
+        let id = create.id.clone();
+        let info = mock_info(&create.validators[0], &[]);
+        execute(deps.as_mut(), mock_env(), info, ExecuteMsg::Approve { id }).unwrap();
+
+        // now that it's approved, topping up with further tokens fails (contract is locked)
+        let info = mock_info(&create.validators[0], &[]);
+        let top_up = mock_topup_cw20_message(&create.id).unwrap();
+        let err = execute(deps.as_mut(), mock_env(), info.clone(), top_up).unwrap_err();
+        assert!(matches!(err, ContractError::Locked { .. }));
+
+        // now that it's approved, you can't approve again
+        let err = execute(
+            deps.as_mut(),
+            mock_env(),
+            info.clone(),
+            ExecuteMsg::Approve {
+                id: create.id.clone(),
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(err, ContractError::Locked { .. }));
+
+        // now that it's approved, you can't reject
+        let err = execute(
+            deps.as_mut(),
+            mock_env(),
+            info,
+            ExecuteMsg::Refund {
+                id: create.id.clone(),
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(err, ContractError::Locked { .. }));
+    }
+
+    #[test]
+    fn rejected_proposal_is_locked() {
+        // quickly create a proposal, funding it with cw20 tokens
+        let mut deps = mock_dependencies(&[]);
+        let (create, msg, info) = quick_create_msg_cw20();
+        execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+
+        // approve it
+        let id = create.id.clone();
+        let info = mock_info(&create.validators[0], &[]);
+        execute(deps.as_mut(), mock_env(), info, ExecuteMsg::Refund { id }).unwrap();
+
+        // now that it's rejected, topping up with further tokens fails (contract is locked)
+        let info = mock_info(&create.validators[0], &[]);
+        let top_up = mock_topup_cw20_message(&create.id).unwrap();
+        let err = execute(deps.as_mut(), mock_env(), info.clone(), top_up).unwrap_err();
+        assert!(matches!(err, ContractError::Locked { .. }));
+
+        // now that it's rejected, you can't approve again
+        let err = execute(
+            deps.as_mut(),
+            mock_env(),
+            info.clone(),
+            ExecuteMsg::Approve {
+                id: create.id.clone(),
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(err, ContractError::Locked { .. }));
+
+        // now that it's rejected, you can't reject
+        let err = execute(
+            deps.as_mut(),
+            mock_env(),
+            info,
+            ExecuteMsg::Refund {
+                id: create.id.clone(),
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(err, ContractError::Locked { .. }));
     }
 }
