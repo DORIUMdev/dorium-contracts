@@ -118,10 +118,7 @@ pub fn execute_create(
         Some(_) => Err(ContractError::AlreadyInUse {}),
     })?;
 
-    let res = Response {
-        attributes: vec![attr("action", "create"), attr("id", msg.id)],
-        ..Response::default()
-    };
+    let res = Response::new().add_attributes(vec![attr("action", "create"), attr("id", msg.id)]);
     Ok(res)
 }
 
@@ -152,11 +149,7 @@ pub fn execute_top_up(
 
     // and save
     ESCROWS.save(deps.storage, &id, &escrow)?;
-
-    let res = Response {
-        attributes: vec![attr("action", "top_up"), attr("id", id)],
-        ..Response::default()
-    };
+    let res = Response::new().add_attributes(vec![attr("action", "top_up"), attr("id", id)]);
     Ok(res)
 }
 
@@ -188,12 +181,9 @@ pub fn execute_approve(
             attr("id", id),
             attr("to", escrow.proposer),
         ];
-        Ok(Response {
-            submessages: vec![],
-            messages,
-            attributes,
-            data: None,
-        })
+        Ok(Response::new()
+            .add_attributes(attributes)
+            .add_messages(messages))
     }
 }
 
@@ -225,12 +215,9 @@ pub fn execute_refund(
             attr("id", id),
             attr("to", escrow.source),
         ];
-        Ok(Response {
-            submessages: vec![],
-            messages,
-            attributes,
-            data: None,
-        })
+        Ok(Response::new()
+            .add_attributes(attributes)
+            .add_messages(messages))
     }
 }
 
@@ -257,7 +244,7 @@ fn send_tokens(to: &Addr, balance: &GenericBalance) -> StdResult<Vec<CosmosMsg>>
             let exec = WasmMsg::Execute {
                 contract_addr: c.address.to_string(),
                 msg: to_binary(&msg)?,
-                send: vec![],
+                funds: vec![],
             };
             Ok(exec.into())
         })
@@ -286,7 +273,7 @@ fn refund_or_burn_tokens(to: &Addr, balance: &GenericBalance) -> StdResult<Vec<C
             let exec = WasmMsg::Execute {
                 contract_addr: c.address.to_string(),
                 msg: to_binary(&msg)?,
-                send: vec![],
+                funds: vec![],
             };
             Ok(exec.into())
         })
@@ -363,7 +350,7 @@ fn query_list_detailed(deps: Deps) -> StdResult<ListDetailedResponse> {
 #[cfg(test)]
 mod tests {
     use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
-    use cosmwasm_std::{coin, coins, Coin, CosmosMsg, StdError, Uint128};
+    use cosmwasm_std::{coin, coins, Coin, CosmosMsg, StdError, SubMsg, Uint128};
 
     use crate::msg::ExecuteMsg::TopUp;
 
@@ -372,7 +359,7 @@ mod tests {
         let base = TopUp { id: id.to_string() };
         let top_up = ExecuteMsg::Receive(Cw20ReceiveMsg {
             sender: String::from("random"),
-            amount: Uint128(7890),
+            amount: Uint128::new(7890),
             msg: to_binary(&base).unwrap(),
         });
         return Ok(top_up);
@@ -390,7 +377,7 @@ mod tests {
         };
         let receive = Cw20ReceiveMsg {
             sender: String::from("dorium"),
-            amount: Uint128(100),
+            amount: Uint128::new(100),
             msg: to_binary(&ExecuteMsg::Create(create.clone())).unwrap(),
         };
         let token_contract = String::from("my-cw20-token");
@@ -400,7 +387,7 @@ mod tests {
     }
     #[test]
     fn approve_proposal_native_token() {
-        let mut deps = mock_dependencies(&[]);
+        let mut deps = mock_dependencies();
 
         // instantiate an empty contract
         let instantiate_msg = InstantiateMsg {};
@@ -452,7 +439,7 @@ mod tests {
         assert_eq!(attr("action", "approve"), res.attributes[0]);
         assert_eq!(
             res.messages[0],
-            CosmosMsg::Bank(BankMsg::Send {
+            SubMsg::new(BankMsg::Send {
                 to_address: create.proposer,
                 amount: balance,
             })
@@ -461,7 +448,7 @@ mod tests {
 
     #[test]
     fn approve_proposal_cw20_token() {
-        let mut deps = mock_dependencies(&[]);
+        let mut deps = mock_dependencies();
 
         // instantiate an empty contract
         let instantiate_msg = InstantiateMsg {};
@@ -481,7 +468,7 @@ mod tests {
         };
         let receive = Cw20ReceiveMsg {
             sender: String::from("dorium"),
-            amount: Uint128(100),
+            amount: Uint128::new(100),
             msg: to_binary(&ExecuteMsg::Create(create.clone())).unwrap(),
         };
         let token_contract = String::from("my-cw20-token");
@@ -505,7 +492,7 @@ mod tests {
                 native_balance: vec![],
                 cw20_balance: vec![Cw20Coin {
                     address: String::from("my-cw20-token"),
-                    amount: Uint128(100),
+                    amount: Uint128::new(100),
                 }],
                 cw20_whitelist: vec![String::from("other-token"), String::from("my-cw20-token")],
                 status: Status::Opened {},
@@ -531,17 +518,17 @@ mod tests {
         };
         assert_eq!(
             res.messages[0],
-            CosmosMsg::Wasm(WasmMsg::Execute {
+            SubMsg::new(WasmMsg::Execute {
                 contract_addr: token_contract,
                 msg: to_binary(&send_msg).unwrap(),
-                send: vec![],
+                funds: vec![],
             })
         );
     }
 
     #[test]
     fn reject_proposal_cw20_token() {
-        let mut deps = mock_dependencies(&[]);
+        let mut deps = mock_dependencies();
 
         // instantiate an empty contract
         let instantiate_msg = InstantiateMsg {};
@@ -561,7 +548,7 @@ mod tests {
         };
         let receive = Cw20ReceiveMsg {
             sender: String::from("dorium"),
-            amount: Uint128(100),
+            amount: Uint128::new(100),
             msg: to_binary(&ExecuteMsg::Create(create.clone())).unwrap(),
         };
         let token_contract = String::from("my-cw20-token");
@@ -580,20 +567,20 @@ mod tests {
 
         // ensure that the escrow contract told the CW20 contract to burn the tokens
         let burn_msg = Cw20ExecuteMsg::Burn {
-            amount: Uint128(100),
+            amount: Uint128::new(100),
         };
         assert_eq!(
             res.messages[0],
-            CosmosMsg::Wasm(WasmMsg::Execute {
+            SubMsg::new(WasmMsg::Execute {
                 contract_addr: token_contract,
                 msg: to_binary(&burn_msg).unwrap(),
-                send: vec![],
+                funds: vec![],
             })
         );
     }
     #[test]
     fn top_up_mixed_tokens() {
-        let mut deps = mock_dependencies(&[]);
+        let mut deps = mock_dependencies();
 
         // instantiate an empty contract
         let instantiate_msg = InstantiateMsg {};
@@ -639,7 +626,7 @@ mod tests {
         };
         let top_up = ExecuteMsg::Receive(Cw20ReceiveMsg {
             sender: String::from("random"),
-            amount: Uint128(7890),
+            amount: Uint128::new(7890),
             msg: to_binary(&base).unwrap(),
         });
         let info = mock_info(&bar_token, &[]);
@@ -655,7 +642,7 @@ mod tests {
         };
         let top_up = ExecuteMsg::Receive(Cw20ReceiveMsg {
             sender: String::from("random"),
-            amount: Uint128(7890),
+            amount: Uint128::new(7890),
             msg: to_binary(&base).unwrap(),
         });
         let info = mock_info(&baz_token, &[]);
@@ -669,7 +656,7 @@ mod tests {
         };
         let top_up = ExecuteMsg::Receive(Cw20ReceiveMsg {
             sender: String::from("random"),
-            amount: Uint128(888),
+            amount: Uint128::new(888),
             msg: to_binary(&base).unwrap(),
         });
         let info = mock_info(&foo_token, &[]);
@@ -687,7 +674,7 @@ mod tests {
         // first message releases all native coins
         assert_eq!(
             res.messages[0],
-            CosmosMsg::Bank(BankMsg::Send {
+            SubMsg::new(BankMsg::Send {
                 to_address: create.proposer.clone(),
                 amount: vec![coin(100, "fee"), coin(500, "stake"), coin(250, "random")],
             })
@@ -696,28 +683,28 @@ mod tests {
         // second one release bar cw20 token
         let send_msg = Cw20ExecuteMsg::Transfer {
             recipient: create.proposer.clone(),
-            amount: Uint128(7890),
+            amount: Uint128::new(7890),
         };
         assert_eq!(
             res.messages[1],
-            CosmosMsg::Wasm(WasmMsg::Execute {
+            SubMsg::new(WasmMsg::Execute {
                 contract_addr: bar_token,
                 msg: to_binary(&send_msg).unwrap(),
-                send: vec![],
+                funds: vec![],
             })
         );
 
         // third one release foo cw20 token
         let send_msg = Cw20ExecuteMsg::Transfer {
             recipient: create.proposer,
-            amount: Uint128(888),
+            amount: Uint128::new(888),
         };
         assert_eq!(
             res.messages[2],
-            CosmosMsg::Wasm(WasmMsg::Execute {
+            SubMsg::new(WasmMsg::Execute {
                 contract_addr: foo_token,
                 msg: to_binary(&send_msg).unwrap(),
-                send: vec![],
+                funds: vec![],
             })
         );
     }
@@ -725,7 +712,7 @@ mod tests {
     #[test]
     fn approved_proposal_is_locked() {
         // quickly create a proposal, funding it with cw20 tokens
-        let mut deps = mock_dependencies(&[]);
+        let mut deps = mock_dependencies();
         let (create, msg, info) = quick_create_msg_cw20();
         execute(deps.as_mut(), mock_env(), info, msg).unwrap();
 
@@ -768,7 +755,7 @@ mod tests {
     #[test]
     fn rejected_proposal_is_locked() {
         // quickly create a proposal, funding it with cw20 tokens
-        let mut deps = mock_dependencies(&[]);
+        let mut deps = mock_dependencies();
         let (create, msg, info) = quick_create_msg_cw20();
         execute(deps.as_mut(), mock_env(), info, msg).unwrap();
 

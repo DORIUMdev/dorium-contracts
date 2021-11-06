@@ -1,7 +1,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::state::{Escrow, GenericBalance, Status};
+use crate::state::Status;
 use cosmwasm_std::{Addr, Api, Coin, StdResult};
 use cw20::{Cw20Coin, Cw20ReceiveMsg};
 #[derive(Serialize, Deserialize, JsonSchema)]

@@ -161,26 +161,26 @@ mod tests {
         let foo_token = Addr::unchecked("foo_token");
         tokens.add_tokens(Balance::Cw20(Cw20CoinVerified {
             address: foo_token.clone(),
-            amount: Uint128(12345),
+            amount: Uint128::new(12345),
         }));
         tokens.add_tokens(Balance::Cw20(Cw20CoinVerified {
             address: bar_token.clone(),
-            amount: Uint128(777),
+            amount: Uint128::new(777),
         }));
         tokens.add_tokens(Balance::Cw20(Cw20CoinVerified {
             address: foo_token.clone(),
-            amount: Uint128(23400),
+            amount: Uint128::new(23400),
         }));
         assert_eq!(
             tokens.cw20,
             vec![
                 Cw20CoinVerified {
                     address: foo_token,
-                    amount: Uint128(35745),
+                    amount: Uint128::new(35745),
                 },
                 Cw20CoinVerified {
                     address: bar_token,
-                    amount: Uint128(777),
+                    amount: Uint128::new(777),
                 }
             ]
         );
