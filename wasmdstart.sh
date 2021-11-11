@@ -11,6 +11,9 @@ wasmd init localnet --chain-id ${CHAIN_ID} --home ${APP_HOME}
 # add minimum gas prices config to app configuration file
 sed -i -r 's/minimum-gas-prices = ""/minimum-gas-prices = "0.01ucosm"/' ${APP_HOME}/config/app.toml
 
+# enable 1317 API
+perl -0777 -i.original -pe 's/# Enable defines if the API server should be enabled.\nenable = false/# Enable defines if the API server should be enabled.\nenable = true/igs' ${APP_HOME}/config/app.toml
+
 # resolve CORS policy blocking during request to the chain by the Keplr API
 sed -i -r 's/cors_allowed_origins = \[\]/cors_allowed_origins = \["*"\]/' ${APP_HOME}/config/config.toml
 
