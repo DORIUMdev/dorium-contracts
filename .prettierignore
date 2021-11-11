@@ -1,6 +1,0 @@
-dist/
-node_modules/
-internals/generators/
-internals/scripts/
-yarn.lock
-package.json
