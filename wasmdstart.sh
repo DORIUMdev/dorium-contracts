@@ -9,7 +9,7 @@ rm -rf $APP_HOME
 wasmd init localnet --chain-id ${CHAIN_ID} --home ${APP_HOME}
 
 # add minimum gas prices config to app configuration file
-sed -i -r 's/minimum-gas-prices = ""/minimum-gas-prices = "0.001udor"/' ${APP_HOME}/config/app.toml
+sed -i -r 's/minimum-gas-prices = ""/minimum-gas-prices = "0.0udor"/' ${APP_HOME}/config/app.toml
 
 # enable 1317 API
 perl -0777 -i.original -pe 's/# Enable defines if the API server should be enabled.\nenable = false/# Enable defines if the API server should be enabled.\nenable = true/igs' ${APP_HOME}/config/app.toml
