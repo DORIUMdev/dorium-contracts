@@ -1,7 +1,7 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
-    to_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult, Uint128,
+    to_binary, Addr, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult, Uint128,
 };
 use cw2::set_contract_version;
 use cw20::{Cw20Contract, Cw20ExecuteMsg, Cw20ReceiveMsg};
@@ -23,8 +23,8 @@ pub fn instantiate(
 ) -> Result<Response, ContractError> {
     let state = State {
         exchanged: Uint128::zero(),
-        value_token_address: msg.value_token_address.clone(),
-        sobz_token_address: msg.sobz_token_address.clone(),
+        value_token_address: Addr::from(info.sender.clone()),
+        sobz_token_address: Addr::from(info.sender),
     };
     set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
     STATE.save(deps.storage, &state)?;
@@ -32,8 +32,8 @@ pub fn instantiate(
     Ok(Response::new()
         .add_attribute("method", "instantiate")
         .add_attribute("exchanged", "0")
-        .add_attribute("value_token_address", msg.value_token_address)
-        .add_attribute("sobz_token_address", msg.sobz_token_address))
+        .add_attribute("value_token_address", state.value_token_address)
+        .add_attribute("sobz_token_address", state.sobz_token_address))
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
@@ -44,7 +44,11 @@ pub fn execute(
     msg: ExecuteMsg,
 ) -> Result<Response, ContractError> {
     match msg {
-        ExecuteMsg::Exchange(msg) => try_exchange(deps, info, msg),
+        ExecuteMsg::Receive(msg) => try_exchange(deps, info, msg),
+        ExecuteMsg::SetTokens {
+            value_token_address,
+            sobz_token_address,
+        } => set_tokens(deps, info, value_token_address, sobz_token_address),
     }
 }
 
@@ -56,7 +60,10 @@ pub fn try_exchange(
     // did the Cw20ReceiveMsg come from the Value Token Contract? If so, continue.
     let state = STATE.load(deps.storage)?;
     if info.sender != state.value_token_address {
-        return Err(ContractError::Unauthorized {});
+        return Err(ContractError::UnauthorizedValueToken {
+            info_sender: info.sender,
+            state_value_token_address: state.value_token_address,
+        });
     }
 
     // send message to Cw20 Value Token to burn
@@ -85,6 +92,26 @@ pub fn try_exchange(
         .add_attribute("exchange", stringify!(msg.amount))
         .add_message(value_token_msg)
         .add_message(sobz_token_msg))
+}
+
+pub fn set_tokens(
+    deps: DepsMut,
+    info: MessageInfo,
+    value_token_address: Addr,
+    sobz_token_address: Addr,
+) -> Result<Response, ContractError> {
+    let mut state = STATE.load(deps.storage)?;
+
+    state.value_token_address = value_token_address.clone();
+    state.sobz_token_address = sobz_token_address.clone();
+
+    set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
+    STATE.save(deps.storage, &state)?;
+
+    Ok(Response::new()
+        .add_attribute("method", "set_tokens")
+        .add_attribute("value_token", value_token_address)
+        .add_attribute("sobz_token", sobz_token_address))
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
@@ -146,7 +173,7 @@ mod tests {
             amount: Uint128::new(18),
             msg: to_binary(&ReceiveMsg::Send {}).unwrap(),
         };
-        let execute_msg = ExecuteMsg::Exchange(receive_msg);
+        let execute_msg = ExecuteMsg::Receive(receive_msg);
         let res = execute(deps.as_mut(), mock_env(), info, execute_msg).unwrap();
 
         // check that exchange contract told TREE and SOBZ CW20 contracts to Mint and Burn respectively
