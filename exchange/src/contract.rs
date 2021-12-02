@@ -22,6 +22,7 @@ pub fn instantiate(
     msg: InstantiateMsg,
 ) -> Result<Response, ContractError> {
     let state = State {
+        owner: msg.owner,
         exchanged: Uint128::zero(),
         value_token_address: Addr::from(info.sender.clone()),
         sobz_token_address: Addr::from(info.sender),
@@ -32,6 +33,7 @@ pub fn instantiate(
     Ok(Response::new()
         .add_attribute("method", "instantiate")
         .add_attribute("exchanged", "0")
+        .add_attribute("owner", state.owner)
         .add_attribute("value_token_address", state.value_token_address)
         .add_attribute("sobz_token_address", state.sobz_token_address))
 }
@@ -102,6 +104,13 @@ pub fn set_tokens(
 ) -> Result<Response, ContractError> {
     let mut state = STATE.load(deps.storage)?;
 
+    // Not just anybody can set the token addresses! You've got to be the owner
+    if info.sender != state.owner {
+        return Err(ContractError::UnauthorizedSetToken {
+            owner: state.owner,
+            sender: info.sender,
+        });
+    }
     state.value_token_address = value_token_address.clone();
     state.sobz_token_address = sobz_token_address.clone();
 
@@ -141,14 +150,14 @@ mod tests {
         let mut deps = mock_dependencies(&[]);
 
         let msg = InstantiateMsg {
-            value_token_address: Addr::unchecked("TREE"),
-            sobz_token_address: Addr::unchecked("SOBZ"),
+            owner: Addr::unchecked("Dorium"),
         };
         let info = mock_info("creator", &coins(1000, "earth"));
 
         // we can just call .unwrap() to assert this was a success
         let res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
         assert_eq!(0, res.messages.len());
+        assert_eq!("Dorium", res.attributes[2].value);
 
         // it worked, let's query the state
         let res = query(deps.as_ref(), mock_env(), QueryMsg::GetExchanged {}).unwrap();
@@ -157,15 +166,22 @@ mod tests {
     }
 
     #[test]
-    fn exchange() {
+    fn exchange_works() {
         let mut deps = mock_dependencies(&coins(2, "token"));
 
+        // Instantiate the exchange
         let msg = InstantiateMsg {
+            owner: Addr::unchecked("Dorium"),
+        };
+        let info = mock_info("Dorium", &coins(2, "token"));
+        let _res = instantiate(deps.as_mut(), mock_env(), info.clone(), msg).unwrap();
+
+        // After instantiating, we need to set the addresses of the CW20 tokens
+        let set_tokens_msg = ExecuteMsg::SetTokens {
             value_token_address: Addr::unchecked("TREE"),
             sobz_token_address: Addr::unchecked("SOBZ"),
         };
-        let info = mock_info("Dorium", &coins(2, "token"));
-        let _res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
+        execute(deps.as_mut(), mock_env(), info, set_tokens_msg).unwrap();
 
         let info = mock_info("TREE", &coins(2, "token"));
         let receive_msg = Cw20ReceiveMsg {
@@ -208,5 +224,70 @@ mod tests {
         let res = query(deps.as_ref(), mock_env(), QueryMsg::GetExchanged {}).unwrap();
         let value: ExchangedResponse = from_binary(&res).unwrap();
         assert_eq!(Uint128::new(18), value.exchanged);
+    }
+    #[test]
+    fn exchange_unauthorized_cw20_denied() {
+        let mut deps = mock_dependencies(&coins(2, "token"));
+
+        // Instantiate the exchange
+        let msg = InstantiateMsg {
+            owner: Addr::unchecked("Dorium"),
+        };
+        let info = mock_info("Dorium", &coins(2, "token"));
+        let _res = instantiate(deps.as_mut(), mock_env(), info.clone(), msg).unwrap();
+
+        // If we don't set the addresses of the CW20 tokens, the CW20 token
+        // addresses allowed will be set to "Dorium". But we're going to send a
+        // message from the CW20 smart contract "TREE". So it should fail.
+
+        let info = mock_info("TREE", &coins(2, "token"));
+        let receive_msg = Cw20ReceiveMsg {
+            sender: String::from("some user"),
+            amount: Uint128::new(18),
+            msg: to_binary(&ReceiveMsg::Send {}).unwrap(),
+        };
+        let execute_msg = ExecuteMsg::Receive(receive_msg);
+        let res = execute(deps.as_mut(), mock_env(), info, execute_msg);
+
+        // check that exchange contract gave an error
+        println!("{:?}", res);
+        assert_eq!(
+            res,
+            Err(ContractError::UnauthorizedValueToken {
+                info_sender: Addr::unchecked("TREE"),
+                state_value_token_address: Addr::unchecked("Dorium")
+            })
+        );
+
+        // exchange contract's counter should've increased by <amount>
+        let res = query(deps.as_ref(), mock_env(), QueryMsg::GetExchanged {}).unwrap();
+        let value: ExchangedResponse = from_binary(&res).unwrap();
+        assert_eq!(Uint128::new(0), value.exchanged);
+    }
+    #[test]
+    fn only_owner_can_set_tokens() {
+        let mut deps = mock_dependencies(&coins(2, "token"));
+
+        // Instantiate the exchange
+        let msg = InstantiateMsg {
+            owner: Addr::unchecked("Dorium"),
+        };
+        let info = mock_info("Dorium", &coins(2, "token"));
+        let _res = instantiate(deps.as_mut(), mock_env(), info.clone(), msg).unwrap();
+
+        // After instantiating, we need to set the addresses of the CW20 tokens
+        let set_tokens_msg = ExecuteMsg::SetTokens {
+            value_token_address: Addr::unchecked("TREE"),
+            sobz_token_address: Addr::unchecked("SOBZ"),
+        };
+        let info = mock_info("Attacker", &coins(2, "token"));
+        let res = execute(deps.as_mut(), mock_env(), info, set_tokens_msg);
+        assert_eq!(
+            res,
+            Err(ContractError::UnauthorizedSetToken {
+                owner: Addr::unchecked("Dorium"),
+                sender: Addr::unchecked("Attacker")
+            })
+        );
     }
 }
