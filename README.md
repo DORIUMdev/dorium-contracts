@@ -1,8 +1,11 @@
+# Dorium Contracts
+This repository contains the Dorium proposal and Value-SoBz Exchange Rust smart contracts, as well as tools to start the blockchain on which these smart contracts should be deployed.
+
+Actual interaction with the smart contracts and the running blockchain is handled by code at https://github.com/apeunit/dorcp-helper
+
 # How to Use
-1. install https://github.com/CosmWasm/wasmd.git, checkout branch v0.16.0 or v0.17.0 (these contracts are written with cosmwasm 0.14, which requires these versions)
-2. `cp .env.example .env`, run `wasmd keys mnemonic` twice, copy the output into MNEMONIC_* in `.env`
-3. `./wasmdkeys.sh` - this runs `wasmd keys add` for the accounts main and validator
-4. `./wasmdstart.sh` to start the blockchain (data is stored in `./wasmddata`, which  be deleted every time you run this)
-5. `npm install`
-6. `ts-node index.ts upload` to upload compiled .wasm smart contracts under `./binaries` to the blockchain. The upload results are stored in `./contracts.json`
-7. `ts-node index.ts deploy` to deploy the wasm smart contracts with some default settings (see `src/deploy.ts`)
+1. Build and install wasmd from https://github.com/CosmWasm/wasmd.git, checkout branch v0.20.0 (the cosmwasm smart contract library versions that these smart contracts rely on decide which wasmd version you should run)
+2. Run `wasmd keys mnemonic` twice to generate two new account secrets. One of them is used as the blockchain validator, and one the other will be used to deploy the smart contracts from. Tell `wasmd` to remember these accounts by running `wasmd keys add main --keyring-backend=test --recover` and `wasmd keys add validator --keyring-backend=test --recover` respectively.
+3. You may now run `wasmdstart.sh` to generate a new genesis file and start the blockchain.
+4. Pull the repo https://github.com/apeunit/dorcp-helper and follow the instructions there. Paste the two mnemonics into the example `.env` file, which must reside in the `dorcp-helper` directory.
+5. `wasmd.service` is a systemd unit file which you can copy somewhere (depends on your Linux distro) so that systemd can ensure that the wasmd is always running.
